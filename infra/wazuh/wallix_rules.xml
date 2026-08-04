@@ -1,0 +1,179 @@
+<!--
+  WALLIX Bastion rules for Wazuh 4.x
+  ==================================
+  Reserved rule id range for this project: 100500-100550.
+
+  Layering:
+    100500  base    - fires on any decoded WALLIX event (low level, if_sid anchor)
+    100502+ session - lifecycle (established / disconnect / auth fail / file transfer)
+    100510+ command - risk-keyword detection on type="KBD_INPUT"
+    100530+ native  - WALLIX's own detections (KILL_/WARNING_/NOTIFY_COMMAND_DETECTED)
+
+  Fields supplied by wallix_decoder.xml:
+    session_id, srcip, dstip, srcuser, dsthost, protocol, dstuser,
+    wallix_event, command, duration
+
+  Identity note: srcuser = Bastion login user (e.g. test-ssh)
+                 dstuser = vaulted target account (e.g. svc-debian)
+
+  IMPORTANT: every <field> uses type="pcre2". Wazuh's default OS_Regex engine
+  does NOT support word boundaries (\b) or alternation groups ( a | b ), and
+  including them makes wazuh-analysisd fail to start.
+
+  Keep the keyword lists in sync with the risk-keyword flags in transform.py.
+
+  Install path (container): /var/ossec/etc/rules/wallix_rules.xml
+  Test with: /var/ossec/bin/wazuh-logtest
+-->
+
+<group name="wallix,pam,">
+
+  <!-- ============ 100500: base rule ============ -->
+  <!--
+    Level 2 keeps it below log_alert_level (3), so it does not flood alerts.json
+    on its own while still anchoring every child rule.
+  -->
+  <rule id="100500" level="2">
+    <decoded_as>wallix</decoded_as>
+    <description>WALLIX Bastion event ($(wallix_event))</description>
+  </rule>
+
+  <!-- ============ Session lifecycle ============ -->
+
+  <rule id="100502" level="3">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">^SESSION_ESTABLISHED_SUCCESSFULLY$</field>
+    <description>WALLIX: privileged session opened - $(srcuser) as $(dstuser)@$(dsthost)</description>
+    <group>authentication_success,pam,</group>
+  </rule>
+
+  <rule id="100503" level="3">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">^SESSION_DISCONNECTION$</field>
+    <description>WALLIX: privileged session closed - $(srcuser) on $(dsthost) after $(duration)</description>
+    <group>pam,</group>
+  </rule>
+
+  <rule id="100504" level="8">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">FAILED|AUTHENTICATION_FAILURE|CONNECTION_FAILED</field>
+    <description>WALLIX: connection or authentication failure - $(srcuser) to $(dsthost)</description>
+    <group>authentication_failed,pam,</group>
+  </rule>
+
+  <rule id="100505" level="5">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">^SFTP_EVENT$|^SCP_EVENT$|^FILE_</field>
+    <description>WALLIX: file transfer event ($(wallix_event)) in session $(session_id)</description>
+    <group>pam,file_transfer,</group>
+  </rule>
+
+  <!-- ============ 100510+: risk-keyword command detection ============ -->
+
+  <!-- credential access: shadow/passwd files, key material, credential dumping -->
+  <rule id="100510" level="12">
+    <if_sid>100500</if_sid>
+    <field name="command" type="pcre2">/etc/shadow|/etc/passwd|/etc/gshadow|id_rsa|id_ed25519|\.aws/credentials|mimikatz|lsass|secretsdump|hashdump</field>
+    <description>WALLIX critical command (credential access) by $(srcuser): $(command)</description>
+    <mitre>
+      <id>T1003</id>
+      <id>T1552</id>
+    </mitre>
+    <group>attack,credential_access,</group>
+  </rule>
+
+  <!-- privilege escalation: user and sudoers manipulation, setuid bits -->
+  <rule id="100512" level="12">
+    <if_sid>100500</if_sid>
+    <field name="command" type="pcre2">useradd|usermod|adduser|visudo|/etc/sudoers|chmod\s+u\+s|chmod\s+[0-7]*[4267][0-7][0-7]|setcap</field>
+    <description>WALLIX critical command (privilege escalation) by $(srcuser): $(command)</description>
+    <mitre>
+      <id>T1548</id>
+      <id>T1136</id>
+    </mitre>
+    <group>attack,privilege_escalation,</group>
+  </rule>
+
+  <!-- persistence: cron, systemd units, rc.local, ssh authorized_keys -->
+  <rule id="100514" level="10">
+    <if_sid>100500</if_sid>
+    <field name="command" type="pcre2">crontab|/etc/cron|systemctl\s+enable|/etc/rc\.local|authorized_keys|/etc/systemd/system</field>
+    <description>WALLIX suspicious command (persistence) by $(srcuser): $(command)</description>
+    <mitre>
+      <id>T1053</id>
+      <id>T1098</id>
+    </mitre>
+    <group>attack,persistence,</group>
+  </rule>
+
+  <!-- defense evasion: history clearing, log deletion, audit tampering -->
+  <rule id="100516" level="12">
+    <if_sid>100500</if_sid>
+    <field name="command" type="pcre2">history\s+-c|unset\s+HISTFILE|>\s*/var/log|rm\s+.*/var/log|shred|/var/log/wtmp|auditctl|>\s*\.bash_history</field>
+    <description>WALLIX critical command (log tampering) by $(srcuser): $(command)</description>
+    <mitre>
+      <id>T1070</id>
+      <id>T1562</id>
+    </mitre>
+    <group>attack,defense_evasion,</group>
+  </rule>
+
+  <!-- discovery / recon: host, user and network enumeration -->
+  <rule id="100518" level="6">
+    <if_sid>100500</if_sid>
+    <field name="command" type="pcre2">^whoami|^id$|^who$|^w$|^last|netstat|^ss\s|^arp|ifconfig|^ip\s+a|nmap|uname\s+-a|^lsof</field>
+    <description>WALLIX recon command by $(srcuser): $(command)</description>
+    <mitre>
+      <id>T1082</id>
+      <id>T1087</id>
+    </mitre>
+    <group>attack,discovery,</group>
+  </rule>
+
+  <!-- exfiltration: outbound transfer tools, piping archives to the network -->
+  <rule id="100520" level="10">
+    <if_sid>100500</if_sid>
+    <field name="command" type="pcre2">^scp\s|^rsync\s|curl.*(?:-T|--upload)|wget.*--post|^nc\s|tar.*\|\s*(?:nc|ssh)|base64.*\|</field>
+    <description>WALLIX suspicious command (possible exfiltration) by $(srcuser): $(command)</description>
+    <mitre>
+      <id>T1048</id>
+      <id>T1041</id>
+    </mitre>
+    <group>attack,exfiltration,</group>
+  </rule>
+
+  <!-- ============ 100530+: WALLIX native detections ============ -->
+
+  <rule id="100530" level="12">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">^KILL_COMMAND_DETECTED$</field>
+    <description>WALLIX native: command killed by policy - $(srcuser) on $(dsthost)</description>
+    <group>attack,</group>
+  </rule>
+
+  <rule id="100532" level="10">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">^WARNING_COMMAND_DETECTED$|^NOTIFY_COMMAND_DETECTED$</field>
+    <description>WALLIX native: command matched a monitored pattern - $(srcuser) on $(dsthost)</description>
+    <group>attack,</group>
+  </rule>
+
+  <rule id="100534" level="10">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">_PATTERN_DETECTED$</field>
+    <description>WALLIX native: monitored pattern detected ($(wallix_event))</description>
+    <group>attack,</group>
+  </rule>
+
+  <!-- ============ 100540: suppress GUI audit polling noise ============ -->
+  <!--
+    The WALLIX web GUI writes an approval-list poll to wabaudit every 60s.
+    Level 0 discards it so it does not dominate alert volume.
+  -->
+  <rule id="100540" level="0">
+    <if_sid>100500</if_sid>
+    <field name="wallix_event" type="pcre2">^Approval$</field>
+    <description>WALLIX GUI audit polling (suppressed)</description>
+  </rule>
+
+</group>

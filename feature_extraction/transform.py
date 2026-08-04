@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import re
 from collections import Counter
 
@@ -34,13 +35,26 @@ def load_sessions(path: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def strip_scaffolding(commands):
+    """Drop simulate_sessions.py artifacts that aren't real session content:
+    the `echo TAG:<tag>` marker (always the first command, used only to join
+    ground_truth.jsonl to the real session) and a trailing `exit`. Left in,
+    both inflate command_count/skew unique_command_ratio identically across
+    every session -- not a between-class bias, but still wrong. Operates on
+    a copy; extract.py's raw commands list stays untouched for audit."""
+    out = [c for c in commands if not c.strip().startswith("echo TAG:")]
+    if out and out[-1].strip() == "exit":
+        out = out[:-1]
+    return out
+
+
 def normalize_commands(commands):
     """Strip WALLIX literal keystroke tokens (<NL>, <TAB>, <BACKSPACE>) before computing
     entropy/length, else e.g. "ss -tulpn<NL>w<NL>who" skews stats as one long fake command.
     This is a text-level strip, not a true backspace replay (a real <BACKSPACE> should erase
     the preceding character(s), not just vanish) - good enough for v1, revisit if it matters."""
     normalized = []
-    for c in commands:
+    for c in strip_scaffolding(commands):
         c = c.replace("<NL>", " ").replace("<TAB>", " ").replace("<BACKSPACE>", "")
         normalized.append(c.strip())
     return normalized
@@ -102,6 +116,7 @@ def build_features(sessions_path: str) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
+    os.makedirs("./out", exist_ok=True)
     result = build_features("./out/sessions.jsonl")
     cols = ["session_id","start_time", "end_time", "command_count", "unique_command_ratio", "avg_command_length",
             "command_entropy", "flag_cred_access", "flag_privesc", "flag_persistence",

@@ -1,0 +1,106 @@
+{
+  "dba": {
+    "head_freq": {
+      "ls": 8,
+      "du": 11,
+      "ps": 8,
+      "cat": 8,
+      "find": 6,
+      "mv": 4,
+      "cp": 3,
+      "gzip": 2,
+      "sleep": 1,
+      "df": 1
+    },
+    "session_lengths": [
+      4,
+      4,
+      4,
+      8,
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  "admin": {
+    "head_freq": {
+      "ls": 13,
+      "df": 11,
+      "systemctl": 10,
+      "uptime": 10,
+      "free": 10,
+      "who": 10,
+      "ping": 1,
+      "zip": 2,
+      "nslookup": 1,
+      "cp": 5,
+      "du": 3,
+      "cd": 5,
+      "mv": 1,
+      "gzip": 2,
+      "mkdir": 2,
+      "touch": 2
+    },
+    "session_lengths": [
+      6,
+      6,
+      6,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10
+    ]
+  },
+  "dev": {
+    "head_freq": {
+      "cd": 9,
+      "git": 9,
+      "cat": 9,
+      "python3": 9,
+      "sed": 3,
+      "find": 4,
+      "touch": 2,
+      "gzip": 5,
+      "bzip2": 4,
+      "zip": 3,
+      "grep": 4,
+      "chmod": 2,
+      "tail": 1
+    },
+    "session_lengths": [
+      4,
+      4,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  "auditor": {
+    "head_freq": {
+      "cat": 8,
+      "ls": 11,
+      "w": 7,
+      "last": 7,
+      "uptime": 7,
+      "find": 12,
+      "grep": 3
+    },
+    "session_lengths": [
+      5,
+      5,
+      9,
+      9,
+      9,
+      9,
+      9
+    ]
+  }
+}

