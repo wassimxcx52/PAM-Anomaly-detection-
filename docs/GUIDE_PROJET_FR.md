@@ -5,8 +5,8 @@
 > de chaque fichier**, **les personas**, et **les deux approches de Machine
 > Learning** (non supervisée et supervisée) avec leurs métriques.
 >
-> Contexte technique complet : voir `claude.md` (racine). Décisions verrouillées :
-> voir `docs/decision_log.md`.
+> Décisions verrouillées : voir `docs/decision_log.md`. (Le contexte technique
+> détaillé est maintenu dans un document de travail local, hors dépôt.)
 
 ---
 
@@ -53,7 +53,6 @@ d'intégrité d'évaluation.
 
 ```
 hps/
-├── claude.md                  # contexte technique complet (source de vérité)
 ├── README.md
 ├── requirements.txt
 │

@@ -81,8 +81,7 @@ dataset_generation/   curate → calibrate → weight → generate synthetic tra
 │   ├── decision_log.md          # durable decisions (data sourcing, ratios, security)
 │   ├── GUIDE_PROJET_FR.md        # full French project guide
 │   └── GUIDE_VISUEL_FR.pdf       # visual guide
-├── requirements.txt
-└── claude.md                    # full project context/history for AI-assisted development
+└── requirements.txt
 ```
 
 ## Status
