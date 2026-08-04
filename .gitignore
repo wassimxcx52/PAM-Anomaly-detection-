@@ -8,3 +8,6 @@ dataset_generation/commands_dataset/atomic_raw/
 dataset_generation/commands_dataset/gtfobins_raw/
 dataset_generation/commands_dataset/gtfobins.tar.gz
 dataset_generation/commands_dataset/linuxcommands_raw.json
+
+# local-only project context (contains lab credentials)
+claude.md
