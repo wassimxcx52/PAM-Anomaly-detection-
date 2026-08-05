@@ -115,13 +115,19 @@ def build_features(sessions_path: str) -> pd.DataFrame:
     return sessions.merge(features, on="session_id")
 
 
+# Paths are anchored to this file, not the CWD, so the script runs from anywhere.
+HERE = os.path.dirname(os.path.abspath(__file__))
+IN_PATH = os.path.join(HERE, "..", "dataset_generation", "out", "generated_benign.jsonl")
+OUT_PATH = os.path.join(HERE, "out", "features_benign.csv")
+
+
 if __name__ == "__main__":
-    os.makedirs("./out", exist_ok=True)
-    result = build_features("./out/sessions.jsonl")
+    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
+    result = build_features(IN_PATH)
     cols = ["session_id","start_time", "end_time", "command_count", "unique_command_ratio", "avg_command_length",
             "command_entropy", "flag_cred_access", "flag_privesc", "flag_persistence",
             "flag_log_tamper", "flag_recon", "flag_exfil"]
     with pd.option_context("display.max_columns", None, "display.width", 200):
         print(result[cols])
 
-    result.to_csv("./out/features.csv", index=False)
+    result.to_csv(OUT_PATH, index=False)
