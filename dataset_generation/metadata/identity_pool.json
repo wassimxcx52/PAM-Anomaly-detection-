@@ -1,0 +1,444 @@
+{
+  "_meta": {
+    "seed": 1337,
+    "synthetic": true,
+    "note": "Synthetic org. Real telemetry has 1 login user, 1 client IP, 2 targets. Generated sessions keep real_user/real_ip/real_target alongside these values; dataset is semi-synthetic.",
+    "attack_from_home_ip_rate": 0.7,
+    "benign_vpn_rate": 0.08,
+    "benign_jump_rate": 0.02
+  },
+  "users": [
+    {
+      "user": "ghita",
+      "persona": "dev",
+      "home_ips": [
+        "10.20.10.36",
+        "10.20.10.149"
+      ],
+      "team_subnet": "10.20.10.0/24",
+      "entitled_accounts": [
+        "p_dev"
+      ],
+      "work_hour_mean": 11.0,
+      "work_hour_sd": 2.68,
+      "sessions_per_workday": 3.3,
+      "oncall_eligible": false
+    },
+    {
+      "user": "imane",
+      "persona": "dev",
+      "home_ips": [
+        "10.20.10.123",
+        "10.20.10.99"
+      ],
+      "team_subnet": "10.20.10.0/24",
+      "entitled_accounts": [
+        "p_dev"
+      ],
+      "work_hour_mean": 11.0,
+      "work_hour_sd": 2.64,
+      "sessions_per_workday": 4.49,
+      "oncall_eligible": false
+    },
+    {
+      "user": "youssef",
+      "persona": "dev",
+      "home_ips": [
+        "10.20.10.137"
+      ],
+      "team_subnet": "10.20.10.0/24",
+      "entitled_accounts": [
+        "p_dev"
+      ],
+      "work_hour_mean": 11.0,
+      "work_hour_sd": 2.19,
+      "sessions_per_workday": 2.87,
+      "oncall_eligible": false
+    },
+    {
+      "user": "khadija",
+      "persona": "dev",
+      "home_ips": [
+        "10.20.10.193"
+      ],
+      "team_subnet": "10.20.10.0/24",
+      "entitled_accounts": [
+        "p_dev"
+      ],
+      "work_hour_mean": 11.0,
+      "work_hour_sd": 2.67,
+      "sessions_per_workday": 4.69,
+      "oncall_eligible": false
+    },
+    {
+      "user": "yassine",
+      "persona": "dev",
+      "home_ips": [
+        "10.20.10.174",
+        "10.20.10.87"
+      ],
+      "team_subnet": "10.20.10.0/24",
+      "entitled_accounts": [
+        "p_dev"
+      ],
+      "work_hour_mean": 11.0,
+      "work_hour_sd": 2.79,
+      "sessions_per_workday": 3.79,
+      "oncall_eligible": false
+    },
+    {
+      "user": "nadia",
+      "persona": "dev",
+      "home_ips": [
+        "10.20.10.38"
+      ],
+      "team_subnet": "10.20.10.0/24",
+      "entitled_accounts": [
+        "p_dev"
+      ],
+      "work_hour_mean": 11.0,
+      "work_hour_sd": 2.36,
+      "sessions_per_workday": 4.05,
+      "oncall_eligible": false
+    },
+    {
+      "user": "karim",
+      "persona": "dba",
+      "home_ips": [
+        "10.20.20.192"
+      ],
+      "team_subnet": "10.20.20.0/24",
+      "entitled_accounts": [
+        "p_dba"
+      ],
+      "work_hour_mean": 10.0,
+      "work_hour_sd": 1.62,
+      "sessions_per_workday": 2.09,
+      "oncall_eligible": true
+    },
+    {
+      "user": "hamza",
+      "persona": "dba",
+      "home_ips": [
+        "10.20.20.92"
+      ],
+      "team_subnet": "10.20.20.0/24",
+      "entitled_accounts": [
+        "p_dba"
+      ],
+      "work_hour_mean": 10.0,
+      "work_hour_sd": 1.78,
+      "sessions_per_workday": 3.06,
+      "oncall_eligible": true
+    },
+    {
+      "user": "omar",
+      "persona": "dba",
+      "home_ips": [
+        "10.20.20.23"
+      ],
+      "team_subnet": "10.20.20.0/24",
+      "entitled_accounts": [
+        "p_dba"
+      ],
+      "work_hour_mean": 10.0,
+      "work_hour_sd": 2.32,
+      "sessions_per_workday": 2.82,
+      "oncall_eligible": true
+    },
+    {
+      "user": "leila",
+      "persona": "admin",
+      "home_ips": [
+        "10.20.40.166",
+        "10.20.40.78"
+      ],
+      "team_subnet": "10.20.40.0/24",
+      "entitled_accounts": [
+        "bastionsvc",
+        "p_admin"
+      ],
+      "work_hour_mean": 10.5,
+      "work_hour_sd": 3.14,
+      "sessions_per_workday": 4.97,
+      "oncall_eligible": true
+    },
+    {
+      "user": "reda",
+      "persona": "admin",
+      "home_ips": [
+        "10.20.40.74"
+      ],
+      "team_subnet": "10.20.40.0/24",
+      "entitled_accounts": [
+        "bastionsvc",
+        "p_admin"
+      ],
+      "work_hour_mean": 10.5,
+      "work_hour_sd": 3.23,
+      "sessions_per_workday": 3.31,
+      "oncall_eligible": true
+    },
+    {
+      "user": "sara",
+      "persona": "admin",
+      "home_ips": [
+        "10.20.40.189"
+      ],
+      "team_subnet": "10.20.40.0/24",
+      "entitled_accounts": [
+        "bastionsvc",
+        "p_admin"
+      ],
+      "work_hour_mean": 10.5,
+      "work_hour_sd": 2.47,
+      "sessions_per_workday": 4.19,
+      "oncall_eligible": true
+    },
+    {
+      "user": "mehdi",
+      "persona": "auditor",
+      "home_ips": [
+        "10.20.30.26",
+        "10.20.30.153"
+      ],
+      "team_subnet": "10.20.30.0/24",
+      "entitled_accounts": [
+        "p_audit"
+      ],
+      "work_hour_mean": 14.0,
+      "work_hour_sd": 1.83,
+      "sessions_per_workday": 1.84,
+      "oncall_eligible": false
+    },
+    {
+      "user": "amine",
+      "persona": "auditor",
+      "home_ips": [
+        "10.20.30.162"
+      ],
+      "team_subnet": "10.20.30.0/24",
+      "entitled_accounts": [
+        "p_audit"
+      ],
+      "work_hour_mean": 14.0,
+      "work_hour_sd": 2.09,
+      "sessions_per_workday": 1.73,
+      "oncall_eligible": false
+    },
+    {
+      "user": "salma",
+      "persona": "auditor",
+      "home_ips": [
+        "10.20.30.37"
+      ],
+      "team_subnet": "10.20.30.0/24",
+      "entitled_accounts": [
+        "p_audit"
+      ],
+      "work_hour_mean": 14.0,
+      "work_hour_sd": 2.01,
+      "sessions_per_workday": 2.05,
+      "oncall_eligible": false
+    },
+    {
+      "user": "asma",
+      "persona": "auditor",
+      "home_ips": [
+        "10.20.30.100"
+      ],
+      "team_subnet": "10.20.30.0/24",
+      "entitled_accounts": [
+        "p_audit"
+      ],
+      "work_hour_mean": 14.0,
+      "work_hour_sd": 2.1,
+      "sessions_per_workday": 1.25,
+      "oncall_eligible": false
+    }
+  ],
+  "targets": [
+    {
+      "target_hostname": "db-prod-01",
+      "group": "db",
+      "target_ip": "10.10.20.10",
+      "criticality": 3,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "db-prod-02",
+      "group": "db",
+      "target_ip": "10.10.20.11",
+      "criticality": 3,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "db-prod-03",
+      "group": "db",
+      "target_ip": "10.10.20.12",
+      "criticality": 3,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "db-stg-01",
+      "group": "db",
+      "target_ip": "10.10.20.13",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "web-prod-01",
+      "group": "web",
+      "target_ip": "10.10.30.14",
+      "criticality": 2,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "web-prod-02",
+      "group": "web",
+      "target_ip": "10.10.30.15",
+      "criticality": 2,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "web-stg-01",
+      "group": "web",
+      "target_ip": "10.10.30.16",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "web-stg-02",
+      "group": "web",
+      "target_ip": "10.10.30.17",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "dev-01",
+      "group": "dev",
+      "target_ip": "10.10.40.18",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "dev-02",
+      "group": "dev",
+      "target_ip": "10.10.40.19",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "dev-03",
+      "group": "dev",
+      "target_ip": "10.10.40.20",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "dev-04",
+      "group": "dev",
+      "target_ip": "10.10.40.21",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "dev-05",
+      "group": "dev",
+      "target_ip": "10.10.40.22",
+      "criticality": 1,
+      "protocol": "RDP"
+    },
+    {
+      "target_hostname": "build-01",
+      "group": "dev",
+      "target_ip": "10.10.40.23",
+      "criticality": 2,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "dc-01",
+      "group": "infra",
+      "target_ip": "10.10.50.24",
+      "criticality": 3,
+      "protocol": "RDP"
+    },
+    {
+      "target_hostname": "dc-02",
+      "group": "infra",
+      "target_ip": "10.10.50.25",
+      "criticality": 3,
+      "protocol": "RDP"
+    },
+    {
+      "target_hostname": "file-01",
+      "group": "infra",
+      "target_ip": "10.10.50.26",
+      "criticality": 2,
+      "protocol": "RDP"
+    },
+    {
+      "target_hostname": "backup-01",
+      "group": "infra",
+      "target_ip": "10.10.50.27",
+      "criticality": 3,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "mon-01",
+      "group": "infra",
+      "target_ip": "10.10.50.28",
+      "criticality": 1,
+      "protocol": "SSH"
+    },
+    {
+      "target_hostname": "adm-jump-01",
+      "group": "infra",
+      "target_ip": "10.10.50.29",
+      "criticality": 2,
+      "protocol": "RDP"
+    }
+  ],
+  "target_affinity": {
+    "dev": {
+      "dev": 0.7,
+      "web": 0.25,
+      "db": 0.05,
+      "infra": 0.0
+    },
+    "dba": {
+      "db": 0.8,
+      "infra": 0.1,
+      "web": 0.1,
+      "dev": 0.0
+    },
+    "admin": {
+      "infra": 0.45,
+      "web": 0.2,
+      "db": 0.2,
+      "dev": 0.15
+    },
+    "auditor": {
+      "infra": 0.3,
+      "db": 0.3,
+      "web": 0.2,
+      "dev": 0.2
+    }
+  },
+  "roaming": {
+    "vpn_cidr": "10.99.0.0/16",
+    "jump_cidr": "10.30.0.0/24",
+    "jump_ips": [
+      "10.30.0.11",
+      "10.30.0.12"
+    ]
+  },
+  "privileged_accounts": [
+    "p_admin"
+  ],
+  "anomaly_ip_modes": {
+    "unseen_vpn": "unused address in the VPN /16 -- weak, happens benignly",
+    "wrong_team_subnet": "a real workstation IP from ANOTHER persona's subnet -- strongest insider signal",
+    "external": "address outside every known range -- loud and easy"
+  }
+}

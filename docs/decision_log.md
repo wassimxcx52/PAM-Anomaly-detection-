@@ -96,3 +96,49 @@ keeping independent of that rolling context doc.
 - Only 5 real vaulted accounts stand in for personas → per-user baselines are
   really per-persona baselines. Genuine external-validity limitation for the
   report, not something more data collection fixes.
+
+## Metadata layer / diversity strategy (2026-08-05)
+
+Artifact: `dataset_generation/metadata/build_identity_pool.py` →
+`identity_pool.json` (seeded, versioned, reviewable).
+
+- **Governing rule: every synthetic attribute is anchored to an identity's own
+  history; an anomaly is a deviation from THAT identity's baseline, never a
+  globally-unseen value.** If any single metadata axis (IP, target, hour,
+  account) separates the classes on its own, the model memorises metadata and
+  never learns behaviour.
+- **Synthetic population: 16 users over 4 personas, uneven (dev×6, dba×3,
+  admin×3, auditor×4).** With one real login user (`test-ssh`), every per-user
+  feature in the plan (`duration_zscore`, `session_hour_zscore`,
+  `new_source_ip_for_user`) is degenerate and peer-group baselines have no
+  peers. Uneven headcount mirrors real orgs and stresses cold-start.
+- **IP scheme: proposed RFC1918 layout, not the real pool** (per-team
+  `10.20.X.0/24`, VPN `10.99.0.0/16`, jump `10.30.0.0/24`). Swappable for a real
+  pool later without touching generator logic.
+- **~70% of ATTACK sessions originate from the actor's OWN home IP; ~10% of
+  BENIGN sessions roam (VPN/jump).** Real insiders work from their own laptop.
+  Without this symmetry `client_ip` alone solves the task and the command
+  features are never learned. Same reasoning as the existing "both targets must
+  see both benign and attack" constraint.
+- **Strongest IP anomaly is the WRONG-TEAM SUBNET**, i.e. a known-good
+  workstation address attached to the wrong identity — not an unseen address.
+  Requires team-scoped subnets, which is why IPs are not randomly assigned.
+- **Target inventory: ~20 synthetic hosts with group + criticality tier +
+  protocol.** Protocol is a property of the HOST (Linux→SSH, Windows→RDP), so
+  protocol diversity falls out of target affinity instead of being drawn
+  independently. `criticality` is EVALUATION metadata for the risk = anomaly ×
+  impact argument, NOT a model input feature.
+- **Admins carry an on-call rotation:** a 03:00 admin session is normal for the
+  admin on call that week, anomalous for anyone else. This is what makes
+  `session_hour_zscore` earn its place over a flat `off_hours_flag`.
+- **Generator must emit per-user TIMELINES, not independent sessions.**
+  `generate_benign.py` currently draws each timestamp independently, which makes
+  every 24h-window feature (`sessions_count_24h`, `distinct_targets_24h`,
+  `distinct_source_ips_24h`, `concurrent_sessions`) meaningless. Attacks are
+  INSERTED INTO an existing user timeline, not sampled separately. Biggest
+  remaining change to the generator; lands before the attack generator.
+- **Leakage audit is a required validation step:** after generation, train a
+  classifier on metadata-only features (no command features). If it separates
+  the classes well, the metadata is a giveaway and must be rebalanced. Report
+  metadata-only vs metadata+behaviour performance — pre-empts the obvious
+  thesis-defence objection that semi-synthetic labels are self-fulfilling.

@@ -142,7 +142,7 @@ Ordre du pipeline (voir aussi `dataset_generation/README.md`) :
 | `persona_commands_curated.json` | Commandes bénignes par persona. |
 | `real_benign_calibration.json` | Fréquences réelles par persona (calibration). |
 | `persona_weighted.json` | Vocabulaire pondéré prêt à échantillonner. |
-| `linuxcommands_raw.json` | Cache brut (ignoré par git). |
+
 
 ---
 
