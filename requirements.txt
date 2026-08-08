@@ -2,3 +2,7 @@ requests
 urllib3
 pandas
 paramiko
+numpy
+scipy
+scikit-learn
+pyod

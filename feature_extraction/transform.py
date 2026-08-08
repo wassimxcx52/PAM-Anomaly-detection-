@@ -117,14 +117,23 @@ def duration_seconds(row, start, end) -> float:
     return float("nan")
 
 
+def _blank(value):
+    """A field absent from SOME rows comes back as NaN (float), not None, once
+    pandas has squared up the frame -- real sessions.jsonl has such rows where
+    WALLIX never emitted the lifecycle event. `or ""` does not catch NaN."""
+    return value is None or (isinstance(value, float) and pd.isna(value))
+
+
 def per_session_features(row) -> dict:
-    protocol = (row.get("protocol") or "").upper()
+    raw_protocol = row.get("protocol")
+    protocol = "" if _blank(raw_protocol) else str(raw_protocol).upper()
     has_commands = protocol in COMMAND_PROTOCOLS
-    commands = normalize_commands(row.get("commands") or [])
+    raw_commands = row.get("commands")
+    commands = normalize_commands([] if _blank(raw_commands) else raw_commands)
     n = len(commands)
 
-    start = time_parser(row["session_start"])
-    end = time_parser(row["session_end"])
+    start = time_parser(row.get("session_start"))
+    end = time_parser(row.get("session_end"))
 
     features = {
         # ---- protocol-agnostic (valid for SSH and RDP alike) ----
@@ -151,6 +160,103 @@ def per_session_features(row) -> dict:
     return features
 
 
+# ─────────────────────────── source-IP features ─────────────────────────────
+# The first CROSS-SESSION features: everything above describes one session in
+# isolation, these describe a session against that identity's own history.
+#
+# NO FUTURE LEAKAGE. Each session is scored using strictly EARLIER sessions only
+# (`as_of` = its own session_start). A naive groupby would let a user's later
+# sessions define what was "already known" at the time of an earlier one, which
+# inflates every result and is invisible in the output. Hence the explicit
+# time-ordered single pass rather than pandas aggregation.
+#
+# THE SIGNAL THESE ARE FOR. The interesting insider case is not an unknown IP --
+# it is a KNOWN IP attached to the WRONG identity (`ip_foreign_to_user`): a real
+# workstation address from another team's subnet. That is why "seen before
+# globally" and "normal for this user" are tracked separately; jump hosts are a
+# small shared IP set precisely so the two diverge.
+#
+# WHERE THEY ARE MEANINGFUL. Real WALLIX telemetry carries ONE login user and ONE
+# client IP (lab constraint), so on real sessions these columns are constant and
+# will be rejected by ml/unsupervised/train.py's domain gate -- correctly. They
+# are built for the generated side and for the supervised track. Documented, not
+# worked around.
+#
+# CAVEAT on the 24h window: generate_benign.py currently draws each timestamp
+# independently, so a generated user has no real "day". distinct_source_ips_24h
+# is computed correctly but its input is not yet realistic; it becomes meaningful
+# once the generator emits per-user timelines.
+
+IP_FEATURES = ["new_source_ip_for_user", "new_source_ip_globally",
+               "ip_foreign_to_user", "distinct_source_ips_prior",
+               "distinct_source_ips_24h", "source_ip_entropy"]
+
+
+def _shannon(counter: Counter) -> float:
+    total = sum(counter.values())
+    if total <= 0:
+        return 0.0
+    h = -sum((c / total) * math.log2(c / total) for c in counter.values())
+    return abs(h)      # a single-IP history gives -0.0; write 0.0
+
+
+def add_ip_features(features: pd.DataFrame) -> pd.DataFrame:
+    """Per-user source-IP history features, computed as_of each session start.
+
+    Conventions, chosen so a first session is not silently indistinguishable from
+    a repeat one:
+      * a user's FIRST session is new_source_ip_for_user = 1 (it is, trivially),
+        with distinct_source_ips_prior = 0 and source_ip_entropy = 0.0
+      * ip_foreign_to_user requires the IP to be globally known AND new to this
+        user, so a genuinely first-ever IP does not count as "foreign"
+      * a session with no client_ip or no parseable timestamp gets NaN, never 0 --
+        absence of evidence is not evidence of absence
+    """
+    out = {c: [np.nan] * len(features) for c in IP_FEATURES}
+
+    if "client_ip" not in features.columns or "user" not in features.columns:
+        for column in IP_FEATURES:
+            features[column] = out[column]
+        return features
+
+    # Time order is the whole point; NaT sorts last and is skipped below.
+    order = features["start_time"].argsort(kind="stable")
+
+    seen_by_user: dict[str, Counter] = {}
+    history: dict[str, list] = {}        # user -> [(timestamp, ip)]
+    seen_globally: set = set()
+
+    for pos in order:
+        row = features.iloc[pos]
+        user, ip, start = row.get("user"), row.get("client_ip"), row.get("start_time")
+        if _blank(user) or _blank(ip) or pd.isna(start):
+            continue
+
+        prior = seen_by_user.get(user, Counter())
+        known_to_user = ip in prior
+        known_globally = ip in seen_globally
+
+        out["new_source_ip_for_user"][pos] = int(not known_to_user)
+        out["new_source_ip_globally"][pos] = int(not known_globally)
+        # known address, unknown for THIS identity -- the strong insider signal
+        out["ip_foreign_to_user"][pos] = int(known_globally and not known_to_user)
+        out["distinct_source_ips_prior"][pos] = len(prior)
+        out["source_ip_entropy"][pos] = _shannon(prior)
+
+        window = [i for t, i in history.get(user, [])
+                  if (start - t).total_seconds() <= 86400]
+        out["distinct_source_ips_24h"][pos] = len(set(window) | {ip})
+
+        # Update AFTER scoring, so the current session never informs its own features.
+        seen_by_user.setdefault(user, Counter())[ip] += 1
+        seen_globally.add(ip)
+        history.setdefault(user, []).append((start, ip))
+
+    for column in IP_FEATURES:
+        features[column] = out[column]
+    return features
+
+
 def build_features(sessions_path: str) -> pd.DataFrame:
     sessions = load_sessions(sessions_path)
     feature_rows = [per_session_features(row) for _, row in sessions.iterrows()]
@@ -158,7 +264,8 @@ def build_features(sessions_path: str) -> pd.DataFrame:
     features = pd.DataFrame(feature_rows)
     # 'protocol' comes from both frames; keep the normalised one from features.
     sessions = sessions.drop(columns=["protocol"], errors="ignore")
-    return sessions.merge(features, on="session_id")
+    merged = sessions.merge(features, on="session_id")
+    return add_ip_features(merged)
 
 
 def split_by_protocol(features: pd.DataFrame) -> dict:

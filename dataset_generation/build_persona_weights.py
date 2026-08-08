@@ -58,6 +58,8 @@ import json
 import os
 import statistics
 
+from command_safety import filter_corpus
+
 DATA = "commands_dataset"
 CURATED = f"{DATA}/persona_commands_curated.json"
 CALIB = f"{DATA}/real_benign_calibration.json"
@@ -126,7 +128,12 @@ def main() -> int:
                     help="print per-persona diversity summary")
     args = ap.parse_args()
 
-    curated = json.load(open(CURATED, encoding="utf-8"))
+    # Same filter the collector applies to its benign filler. Not for safety --
+    # nothing here is executed -- but for PARITY: a command the collector can
+    # never emit must not be in the generated vocabulary either, or the gap
+    # becomes a domain marker in ml/unsupervised/train.py's gate.
+    curated = filter_corpus(json.load(open(CURATED, encoding="utf-8")),
+                            label="persona_weights")
     calib = json.load(open(CALIB, encoding="utf-8"))
 
     out = {}

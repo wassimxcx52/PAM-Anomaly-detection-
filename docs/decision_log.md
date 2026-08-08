@@ -142,3 +142,97 @@ Artifact: `dataset_generation/metadata/build_identity_pool.py` →
   the classes well, the metadata is a giveaway and must be rebalanced. Report
   metadata-only vs metadata+behaviour performance — pre-empts the obvious
   thesis-defence objection that semi-synthetic labels are self-fulfilling.
+
+---
+
+## 2026-08-07 — Unsupervised track v1: first end-to-end result
+
+### Two collection artifacts were found by MEASUREMENT, not inspection
+
+Running the first bake-off surfaced two defects in how `simulate_sessions.py`
+composed sessions. Both were properties of the driver, not of the lab:
+
+1. **`unique_command_ratio` == 1.00 in every real session.** A session was a fixed
+   list of distinct commands run once; real users repeat themselves. The domain
+   gate rejected `unique_command_ratio` (KS 0.94) and `command_entropy` (KS 0.69):
+   a model trained on generated benign would have flagged every real session for
+   *being real*.
+2. **An attack session was 100% attack commands**, so `avg_command_length` alone
+   scored AUC 0.832 — the detector was reading "long command", not behaviour.
+   `recon` (avg 14.3 chars) was indistinguishable from benign and went undetected.
+
+**Decision: fix the COLLECTOR, never calibrate the generator to match a scripting
+artifact.** `simulate_sessions.py` now composes sessions: benign gets variable
+length + repetition (`--stickiness`); attacks get one of `full` / `diluted`
+(scenario intact, benign filler interleaved, so create-then-delete pairs still
+clean up) / `minimal` (1-2 read-only attack commands buried in benign activity,
+`--bury-rate`).
+
+Effect on real telemetry: the benign/attack gap in `avg_command_length` fell from
+25.5 chars to 1.9, `unique_command_ratio` from 1.00 to ~0.77, and **all 5 candidate
+features now pass the domain gate** (previously 3 of 5).
+
+### The domain gate is a required step, and it has a blind spot
+
+Every candidate feature is gated by a two-sample KS between GENERATED benign and
+REAL benign. A feature whose benign distribution differs across domains is a
+domain marker: the detector would flag sessions for being real, and precision@k
+would measure the seam between datasets. Measured, never hand-picked.
+
+**Blind spot, documented deliberately:** the gate compares benign to benign only,
+so it cannot see contamination of the ATTACK class. This bit once — after fixing
+the benign side, 45 of 58 eval attacks were still pre-fix and the reported numbers
+were computed on a 78%-artifact attack class. Hence `build_eval_set.py
+--composed-only`, which keeps only post-fix sessions.
+
+**Leakage caveat for the report:** the gate reads the eval set's benign labels.
+Accepted because the alternative (shipping known domain markers) is worse and the
+gate is blind to the attack class it scores on. With more real benign, hold out a
+calibration slice instead.
+
+### Result on a clean eval set (256 real sessions, 49 attacks, base rate 19.1%)
+
+| model | ROC-AUC | P@25 | P@50 | R@50 |
+|---|---|---|---|---|
+| PCA | 0.778 | **0.72** | **0.60** | 0.61 |
+| MAD (baseline) | **0.798** | 0.68 | 0.48 | 0.49 |
+| IForest | 0.775 | 0.60 | 0.52 | 0.53 |
+| ECOD | 0.755 | 0.56 | 0.54 | 0.55 |
+| HBOS | 0.749 | 0.44 | 0.48 | 0.49 |
+| COPOD | 0.719 | 0.36 | 0.42 | 0.43 |
+
+Random ranker = 0.191 at every k, so PCA@25 is a 3.8x lift.
+
+- **MAD wins ROC-AUC but loses precision@k.** The two metrics disagree, and the
+  one the SOC actually feels is precision@k. Concrete support for the standing
+  decision to report precision@k, not ROC-AUC.
+- **Before the collection fix, HBOS led at 0.862.** That advantage was the
+  artifact, not learning. Worth stating plainly in the report.
+
+### Recall by attack composition — the honest limit
+
+PCA @k=50: `full` 0.92 · `diluted` 0.67 · `minimal` **0.27**
+
+`minimal` sessions average 19.3 chars vs 19.1 for benign — indistinguishable on
+every command-shape feature available. **The detector catches the loud case and
+misses the realistic one.** This is the gap that motivates the contextual features
+(`session_hour_zscore`, `new_source_ip_for_user`, `distinct_targets_24h`), which
+the lab cannot yet supply for REAL sessions: one login user, one client IP, one
+target. Report this as a measured limit, not a tuning failure.
+
+### Safety: the benign corpus contained destructive commands
+
+A collected session executed `mv /usr/local/bin/* /opt/bin/` as root on
+debian-lab. No damage — only because `/usr/local/bin` was empty. Root cause:
+`curate_linux_commands.py` filtered the public corpus against `wallix_rules.xml`
+but never against destructiveness, and the `_COMMANDS_DIR` path had been stale
+since the restructure (silently loading nothing), so the corpus had never been
+exercised until the path was fixed.
+
+**Decision: `dataset_generation/command_safety.py` is the single definition,**
+imported by the collector (SAFETY — it executes as root) and by
+`build_persona_weights.py` (PARITY — a command the collector cannot emit must not
+be in the generated vocabulary, or the gap becomes a domain marker). Blocks state
+mutation and non-terminating commands (`free -s 1`, `tail -f`, `ping` without
+`-c`), which would otherwise hang a session and silently truncate collection.
+1669 of ~3200 commands rejected.
