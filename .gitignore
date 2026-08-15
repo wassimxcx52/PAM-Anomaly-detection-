@@ -11,3 +11,4 @@ dataset_generation/commands_dataset/linuxcommands_raw.json
 
 # local-only project context (contains lab credentials)
 claude.md
+ml/bundles/
