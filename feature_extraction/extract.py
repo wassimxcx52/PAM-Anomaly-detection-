@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -140,6 +141,55 @@ def _parse_duration(raw: Optional[str]) -> Optional[int]:
     return h * 3600 + m * 60 + s
 
 
+# A typed command may contain a double quote, which WALLIX escapes as \" inside
+# data=""/command_line="". The decoder's original [^"]* capture stopped at that
+# escaped quote and truncated the command; wallix_decoder.xml now uses the
+# escape-aware form below. This module keeps its own copy for two reasons:
+#   * REPAIR. full_log preserves the complete line, so events already collected
+#     under the old decoder are recoverable without re-running any sessions --
+#     which matters because the sessions themselves cannot be re-collected.
+#   * INDEPENDENCE. It makes extract.py correct regardless of which decoder
+#     version is deployed on the live manager, and the two copies are checked
+#     against each other by the 244-event corpus documented in the decoder.
+_DATA_FIELD_RE = re.compile(r'(?:data|command_line)="((?:[^"\\]|\\.)*)"')
+
+
+def _unescape(value: str) -> str:
+    r"""Undo WALLIX's transport escaping (\" -> ", \\ -> \).
+
+    The escapes are an artifact of the syslog field encoding, not something the
+    operator typed, so they must not reach command_entropy / avg_command_length.
+    full_log keeps the escaped original for audit.
+    """
+    return value.replace('\\"', '"').replace("\\\\", "\\")
+
+
+def repair_command(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Recover a command truncated by the old decoder, using full_log.
+
+    Only replaces the decoder's value when the re-parsed one EXTENDS it (the
+    decoder's value is a prefix). That way a correctly decoded command is never
+    overwritten, and a genuinely different parse is left alone rather than
+    silently preferred -- if the two disagree in any other way, that is a decoder
+    bug to investigate, not something to paper over here.
+    """
+    full_log, command = event.get("full_log"), event.get("command")
+    if not full_log or not isinstance(command, str):
+        return event
+
+    match = _DATA_FIELD_RE.search(full_log)
+    if not match:
+        return event
+
+    recovered = match.group(1)
+    if recovered != command and recovered.startswith(command):
+        event["command"] = _unescape(recovered)
+        event["command_was_truncated"] = True
+    elif "\\" in command:
+        event["command"] = _unescape(command)
+    return event
+
+
 def normalise(hit: Dict[str, Any]) -> Dict[str, Any]:
     """Map one indexer hit (_source) to schema-contract fields."""
     src = hit.get("_source", hit)
@@ -160,7 +210,7 @@ def normalise(hit: Dict[str, Any]) -> Dict[str, Any]:
     # derived
     out["duration_sec"] = _parse_duration(out.pop("duration_raw", None))
 
-    return out
+    return repair_command(out)
 
 
 # ─────────────────────────── sources ───────────────────────────────────────
@@ -295,11 +345,14 @@ def from_fixture(path: str) -> Iterable[Dict[str, Any]]:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            # if it looks like a raw hit, normalise; else pass through
+            # if it looks like a raw hit, normalise; else pass through.
+            # Already-normalised events still go through repair_command: a
+            # fixture saved under the old decoder carries truncated commands and
+            # full_log alongside them, which is exactly the recoverable case.
             if "_source" in obj or "data" in obj:
                 yield normalise(obj if "_source" in obj else {"_source": obj})
             else:
-                yield obj
+                yield repair_command(obj)
 
 
 def from_generated(path: str) -> Iterable[Dict[str, Any]]:

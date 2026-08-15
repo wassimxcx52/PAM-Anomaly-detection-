@@ -8,6 +8,8 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 
+import command_profile
+
 # Protocols whose WALLIX telemetry actually carries typed commands (KBD_INPUT).
 # RDP is GUI: WALLIX emits session lifecycle only (SESSION_ESTABLISHED /
 # SESSION_DISCONNECTION with duration="H:MM:SS"), no per-command events, unless
@@ -257,7 +259,99 @@ def add_ip_features(features: pd.DataFrame) -> pd.DataFrame:
     return features
 
 
-def build_features(sessions_path: str) -> pd.DataFrame:
+def _normalised_commands(features: pd.DataFrame) -> list:
+    """Normalised command list per row, or None where the protocol carries no
+    command telemetry. Computed once and reused by every rarity path."""
+    out = []
+    for _, row in features.iterrows():
+        if not row.get("has_command_telemetry"):
+            out.append(None)
+        else:
+            raw = row.get("commands")
+            out.append(normalize_commands([] if _blank(raw) else raw))
+    return out
+
+
+def _score_rows(scorer, commands_per_row: list, positions) -> dict:
+    scores = {}
+    for pos in positions:
+        commands = commands_per_row[pos]
+        scores[pos] = (dict.fromkeys(command_profile.FEATURES, np.nan)
+                       if commands is None else scorer.score(commands))
+    return scores
+
+
+def add_rarity_features(features: pd.DataFrame, scorer) -> pd.DataFrame:
+    """Vocabulary-rarity columns from an already-fitted profile (scoring mode).
+
+    Sessions whose protocol carries no command telemetry get NaN, for the same
+    reason the other command features do: absence of evidence is not evidence of
+    absence, and a 0 here would read as "perfectly ordinary vocabulary".
+    """
+    commands_per_row = _normalised_commands(features)
+    scores = _score_rows(scorer, commands_per_row, range(len(features)))
+    return pd.concat([features.reset_index(drop=True),
+                      pd.DataFrame([scores[i] for i in range(len(features))])], axis=1)
+
+
+def add_rarity_features_crossfit(features: pd.DataFrame, benign_mask: pd.Series,
+                                 folds: int, seed: int) -> pd.DataFrame:
+    """Rarity columns for the TRAINING set, fitted OUT OF FOLD.
+
+    WHY THIS EXISTS. Scoring a benign session against a profile built from all
+    benign sessions -- including itself -- makes cmd_oov_rate identically 0 for
+    every training benign row, because its own commands are in the profile by
+    construction. That is not a small bias: it is a perfect separator. Measured
+    on the first attempt (2026-08-15), it drove 5-fold CV PR-AUC to 1.0000 +/-
+    0.0000 and collapsed the real eval scores to 8 distinct values with 64
+    sessions tied at 1.0, which makes precision@k a coin flip inside the tie
+    rather than a measurement.
+
+    The fix is the standard one for any statistic derived from the target
+    population: K-fold cross-fitting. Each benign row is scored against a
+    profile built from the OTHER folds, so its own vocabulary never defines its
+    own normality, and its oov_rate becomes what a genuinely unseen benign
+    session would score.
+
+    Attack rows are scored against the full benign profile. They never
+    contribute to it, so there is nothing to hold out -- and scoring them
+    against a thinner fold-profile would inflate their rarity relative to the
+    benign rows they are compared against.
+    """
+    commands_per_row = _normalised_commands(features)
+    benign_positions = np.flatnonzero(benign_mask.to_numpy())
+    other_positions = np.flatnonzero(~benign_mask.to_numpy())
+
+    rng = np.random.default_rng(seed)
+    assignment = rng.permutation(len(benign_positions)) % folds
+    scores: dict = {}
+
+    for fold in range(folds):
+        held_out = benign_positions[assignment == fold]
+        fit_on = benign_positions[assignment != fold]
+        profile = command_profile.fit(
+            [commands_per_row[p] for p in fit_on if commands_per_row[p] is not None])
+        scores.update(_score_rows(command_profile.Scorer(profile),
+                                  commands_per_row, held_out))
+
+    if len(other_positions):
+        full = command_profile.fit(
+            [commands_per_row[p] for p in benign_positions
+             if commands_per_row[p] is not None])
+        scores.update(_score_rows(command_profile.Scorer(full),
+                                  commands_per_row, other_positions))
+
+    print(f"[profile] cross-fitted over {folds} folds: "
+          f"{len(benign_positions)} benign scored out-of-fold, "
+          f"{len(other_positions)} non-benign scored against the full profile")
+
+    return pd.concat([features.reset_index(drop=True),
+                      pd.DataFrame([scores[i] for i in range(len(features))])], axis=1)
+
+
+def build_features(sessions_path: str, profile_path: str = "",
+                   fit_profile_path: str = "", folds: int = 5,
+                   seed: int = 42) -> pd.DataFrame:
     sessions = load_sessions(sessions_path)
     feature_rows = [per_session_features(row) for _, row in sessions.iterrows()]
 
@@ -265,7 +359,34 @@ def build_features(sessions_path: str) -> pd.DataFrame:
     # 'protocol' comes from both frames; keep the normalised one from features.
     sessions = sessions.drop(columns=["protocol"], errors="ignore")
     merged = sessions.merge(features, on="session_id")
-    return add_ip_features(merged)
+    merged = add_ip_features(merged)
+
+    # The profile is a model parameter fitted on BENIGN only. Two distinct modes:
+    #   --fit-profile : this is the training set. Save a full-benign profile for
+    #                   later scoring, but give the training rows themselves
+    #                   CROSS-FITTED values (see add_rarity_features_crossfit).
+    #   --profile     : this is an evaluation set. Score against the saved
+    #                   profile, which contains none of these sessions.
+    if fit_profile_path:
+        label = merged["label"] if "label" in merged.columns else pd.Series(
+            "benign", index=merged.index)
+        benign_mask = label == "benign"
+
+        commands = [normalize_commands([] if _blank(c) else c)
+                    for c in merged.loc[benign_mask, "commands"]]
+        profile = command_profile.fit(commands, fitted_from=sessions_path)
+        command_profile.save(profile, fit_profile_path)
+        print(f"[profile] fitted on {profile['n_sessions']} benign sessions, "
+              f"{profile['n_commands']} commands, "
+              f"{profile['vocabulary_size']} distinct -> {fit_profile_path}")
+
+        return add_rarity_features_crossfit(merged, benign_mask, folds, seed)
+
+    if profile_path:
+        scorer = command_profile.Scorer(command_profile.load(profile_path))
+        merged = add_rarity_features(merged, scorer)
+
+    return merged
 
 
 def split_by_protocol(features: pd.DataFrame) -> dict:
@@ -309,10 +430,22 @@ if __name__ == "__main__":
                          "alongside it as <out>.<PROTOCOL>.csv")
     ap.add_argument("--no-split", action="store_true",
                     help="skip the per-protocol slices (combined CSV only)")
+    ap.add_argument("--fit-profile", default="",
+                    help="fit a command-rarity profile on this input's BENIGN "
+                         "sessions and write it here (training data only)")
+    ap.add_argument("--profile", default="",
+                    help="apply an existing command-rarity profile (fitted on "
+                         "training benign) and emit the cmd_* columns")
+    ap.add_argument("--profile-folds", type=int, default=5,
+                    help="cross-fitting folds for --fit-profile, so a training "
+                         "session never defines its own normality")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out_path)), exist_ok=True)
-    result = build_features(args.in_path)
+    result = build_features(args.in_path, profile_path=args.profile,
+                            fit_profile_path=args.fit_profile,
+                            folds=args.profile_folds, seed=args.seed)
 
     with pd.option_context("display.max_columns", None, "display.width", 200):
         print(result[[c for c in PREVIEW_COLS if c in result.columns]])

@@ -38,21 +38,40 @@
   Session events that carry a typed command in data="".
   Field order follows the observed WALLIX output; .*? between fields tolerates
   extra or reordered fields being inserted between the anchors we care about.
+
+  THE data= FIELD NEEDS ESCAPE-AWARE CAPTURE, THE OTHERS DO NOT.
+  A typed command can itself contain a double quote, and WALLIX escapes it as \"
+  inside the field. A plain [^"]* stops at that escaped quote and silently
+  truncates the command at its first quote character. Measured on the collected
+  corpus (2026-08-15): 244 of 7506 KBD_INPUT events cut, which is only 3.3% of
+  events but 21% of the DISTINCT command vocabulary -- long quoted awk/find/echo
+  one-liners are exactly the commands that carry quotes. Example, truncated to
+  `(crontab -l 2>/dev/null; echo \` from
+  `(crontab -l 2>/dev/null; echo \"*/5 * * * * /tmp/x.sh\") | crontab -`,
+  which loses the payload of a persistence attack.
+
+  (?:[^"\\]|\\.)* consumes either a non-quote/non-backslash character or any
+  backslash-escaped pair, so it runs past \" and stops only at the real closing
+  quote. The captured value still contains the literal \" escapes; unescaping is
+  extract.py's job (_unescape), keeping the decoder lossless.
+
+  Identity fields (session_id, IPs, user, device, account) cannot contain quotes,
+  so they keep the cheaper [^"]*.
 -->
 <decoder name="wallix-kbd">
   <parent>wallix</parent>
-  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="(KBD_INPUT)"\s+data="([^"]*)"</regex>
+  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="(KBD_INPUT)"\s+data="((?:[^"\\]|\\.)*)"</regex>
   <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,command</order>
 </decoder>
 
 <!-- ============ CHILD 2: command/pattern detection events ============ -->
 <!--
   WALLIX's own detections sometimes carry the matched command in command_line=""
-  rather than data="".
+  rather than data="". Same escape-aware capture as CHILD 1, for the same reason.
 -->
 <decoder name="wallix-cmdline">
   <parent>wallix</parent>
-  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)".*?command_line="([^"]*)"</regex>
+  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)".*?command_line="((?:[^"\\]|\\.)*)"</regex>
   <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,command</order>
 </decoder>
 

@@ -1,0 +1,118 @@
+{
+  "generated_at": "2026-08-15T11:36:14.085266+00:00",
+  "source": "C:\\Users\\niro\\Desktop\\hps\\feature_extraction\\out\\features_eval_real.csv",
+  "seed": 42,
+  "method": "stratified by account, proportional allocation",
+  "calibration": {
+    "n": 50,
+    "per_account": {
+      "bastionsvc": 13,
+      "p_dev": 13,
+      "p_audit": 12,
+      "p_dba": 12
+    },
+    "session_ids": [
+      "19fdc3cb0090eeb1000c291af8a6",
+      "19fdc3cf2e61514d000c291af8a6",
+      "19fdc3d8eed29782000c291af8a6",
+      "19fdc3e590a0de30000c291af8a6",
+      "19fdc3e93fc3c262000c291af8a6",
+      "19fdc3f4b786a55d000c291af8a6",
+      "19fdc4055ddb9ce6000c291af8a6",
+      "19fdc40a2967f04a000c291af8a6",
+      "19fdc41229ae034d000c291af8a6",
+      "19fdc424d1f1081b000c291af8a6",
+      "19fdc43a882cf739000c291af8a6",
+      "19fdc442787a0918000c291af8a6",
+      "19fdc44457644d47000c291af8a6",
+      "19fdc44d634d77f6000c291af8a6",
+      "19fdc45308c40ba6000c291af8a6",
+      "19fdc456db3d37fd000c291af8a6",
+      "19fdc46fd7607703000c291af8a6",
+      "19fdc474b122e754000c291af8a6",
+      "19fdc4765e6ffcdc000c291af8a6",
+      "19fdc47909c56837000c291af8a6",
+      "19fdc47e015a828f000c291af8a6",
+      "19fdc48942a7911e000c291af8a6",
+      "19fdc49bcc7de110000c291af8a6",
+      "19fdc4a5be79d781000c291af8a6",
+      "19fdc5051274bd2b000c291af8a6",
+      "19fdc5242bdc7e34000c291af8a6",
+      "19fdc52a709a06cd000c291af8a6",
+      "19fdc530c8c33012000c291af8a6",
+      "19fdc533b7765370000c291af8a6",
+      "19fdc54826c3dde3000c291af8a6",
+      "19fdc554e62624e5000c291af8a6",
+      "19fdc5585b6bf772000c291af8a6",
+      "19fdc58c0073c147000c291af8a6",
+      "19fdc5b40b3a53e9000c291af8a6",
+      "19fdc5b869d86057000c291af8a6",
+      "19fdc5c00d5f154e000c291af8a6",
+      "19fdc5cac75c22ed000c291af8a6",
+      "19fdc5d6d2fd6e14000c291af8a6",
+      "19fdc6071f4281f1000c291af8a6",
+      "19fdc613a87903ca000c291af8a6",
+      "19fdc619ba85be5e000c291af8a6",
+      "19fdc61e6f3401b6000c291af8a6",
+      "19fdc63662e34150000c291af8a6",
+      "19fdc640aaae1f4d000c291af8a6",
+      "19fdc6427e7fd6b4000c291af8a6",
+      "19fdc65d48258778000c291af8a6",
+      "19fdc65ef6301365000c291af8a6",
+      "19fdc66b3ffe2a11000c291af8a6",
+      "19fdc66ce1a8e917000c291af8a6",
+      "19fdc67e8d3bfdb4000c291af8a6"
+    ]
+  },
+  "evaluation": {
+    "benign": 157,
+    "attacks": 27,
+    "base_rate": 0.1467,
+    "excluded_attacks": {
+      "n": 22,
+      "accounts": [
+        "p_admin"
+      ],
+      "reason": "account is a perfect label proxy in the collected data (100% attack); a lab artifact of simulate_sessions.py's default account, reported separately not in the headline",
+      "scenarios_still_covered": [
+        "cred_access",
+        "exfil",
+        "log_tamper",
+        "persistence",
+        "privesc",
+        "recon"
+      ]
+    }
+  },
+  "targets": {
+    "avg_command_length": {
+      "mean": 21.1227,
+      "std": 6.9715
+    },
+    "unique_command_ratio": {
+      "mean": 0.7353,
+      "std": 0.1422
+    },
+    "command_count": {
+      "mean": 8.9,
+      "std": 2.9503
+    }
+  },
+  "diagnostics": {
+    "command_entropy": {
+      "mean": 2.4547,
+      "std": 0.6822
+    },
+    "duration_sec_feat": {
+      "mean": 8.3,
+      "std": 5.1557
+    }
+  },
+  "representativeness_drift_sd": {
+    "avg_command_length": 0.046,
+    "unique_command_ratio": -0.035,
+    "command_count": 0.004,
+    "command_entropy": 0.043,
+    "duration_sec_feat": 0.185
+  }
+}

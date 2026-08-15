@@ -1,0 +1,44 @@
+{
+  "fitted_from": "C:\\Users\\niro\\Desktop\\hps\\dataset_generation\\metadata\\calibration_slice.json",
+  "seed": 42,
+  "samples_per_persona": 500,
+  "params": {
+    "length_tilt": 0.2091,
+    "stickiness": 0.2912,
+    "arg_variation": 0.0256
+  },
+  "oov": {
+    "target": 0.014,
+    "fitted": 0.0141
+  },
+  "residuals": {
+    "avg_command_length": {
+      "target_mean": 21.1227,
+      "fitted_mean": 20.9547,
+      "gap_in_target_sd": -0.024,
+      "target_std": 6.9715,
+      "fitted_std": 7.4467
+    },
+    "unique_command_ratio": {
+      "target_mean": 0.7353,
+      "fitted_mean": 0.7358,
+      "gap_in_target_sd": 0.003,
+      "target_std": 0.1422,
+      "fitted_std": 0.1569
+    },
+    "command_count": {
+      "target_mean": 8.9,
+      "fitted_mean": 8.5065,
+      "gap_in_target_sd": -0.133,
+      "target_std": 2.9503,
+      "fitted_std": 2.7272
+    }
+  },
+  "family_kl_bits": {
+    "dev": 0.0277,
+    "dba": 0.0154,
+    "admin": 0.0116,
+    "auditor": 0.0229
+  },
+  "family_kl_ok": true
+}

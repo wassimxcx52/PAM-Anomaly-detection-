@@ -236,3 +236,79 @@ be in the generated vocabulary, or the gap becomes a domain marker). Blocks stat
 mutation and non-terminating commands (`free -s 1`, `tail -f`, `ping` without
 `-c`), which would otherwise hang a session and silently truncate collection.
 1669 of ~3200 commands rejected.
+
+## 2026-08-15 — Command rarity, and two leaks that looked like success
+
+Full working notes: `session_2026-08-15_command_rarity.md`. The durable
+decisions:
+
+### The decoder was truncating commands at the first escaped quote
+
+`data="([^"]*)"` stopped at the `\"` WALLIX uses to escape a quote inside a
+command. 244 of 7506 KBD_INPUT events cut — 3.3% of events but **21% of the
+distinct vocabulary**, because quoted `awk`/`find`/`echo` one-liners are the long
+distinctive ones. A persistence attack reached the rules as
+`(crontab -l 2>/dev/null; echo \` with its payload gone.
+
+**Decision: identity fields keep the cheap `[^"]*`; free-text fields (`data`,
+`command_line`) use escape-aware `((?:[^"\]|\.)*)`.** The decoder stays
+lossless (escapes preserved); `extract.py` unescapes.
+
+**Decision: `extract.py` repairs from `full_log` rather than requiring
+re-collection.** `full_log` preserved the complete line, so all 244 were
+recovered offline — real sessions cannot be re-collected, so any future decoder
+fix must come with a repair path, not just a forward fix.
+
+Everything measured before this date used corrupted commands. 129 of the 256
+eval sessions were affected; `session_2026-08-09`'s figures are superseded.
+
+### Rarity features: the profile is global, and fitted out-of-fold
+
+- **Global, not per-persona.** `persona` is NaN on all 49 real attack sessions,
+  so a per-persona profile cannot be selected at scoring time for exactly the
+  sessions being hunted. Per-user degenerates identically (one real login user).
+  Revisit when AD lands.
+- **Cross-fitted.** Fitting the profile on the rows it scores makes
+  `cmd_oov_rate` identically 0 for training benign — a perfect label that drove
+  CV PR-AUC to 1.0000 and tied 64 eval sessions at score 1.0. Any statistic
+  derived from the target population is cross-fitted.
+
+### A feature that does not vary within the reference class is not a feature
+
+`ml/feature_gate.py:reference_class_gate`. The whole-column domain gate cannot
+catch this: such a column varies across the training set (attacks differ) and
+varies in eval — only the within-benign view exposes that the separator was
+handed to the model rather than learned. Needs a float tolerance (`1e-9`); the
+novelty columns are `1.55e-16`, not `0.0`.
+
+### The generated benign vocabulary must be OPEN
+
+A closed vocabulary (850 types × 42 000 draws) makes novelty structurally
+impossible for benign and so makes it a perfect attack marker. Cross-fitting
+does **not** fix this — holding out sessions still leaves every command type.
+
+**Decision: novelty is generated as varied ARGUMENTS, not novel programs**
+(`generate_benign.vary_arguments`) — which is how real novelty arises, and keeps
+`command_safety`'s guarantees intact since no new head or redirection is
+introduced. Fitted as a third knob (`arg_variation`) against the real benign OOV
+rate, alongside `stickiness` and `length_tilt`.
+
+**Trap recorded: the OOV target is sample-size dependent** — the same knob gives
+4.9% OOV at 150 sessions/persona and 0% at 1250. `--oov-samples` must match
+`--per-persona`. Likewise, real-vs-real OOV (22.5%) is not the target;
+real-vs-deployed-profile (1.4%) is, because both classes must be scored against
+the same profile.
+
+### Result: the thesis question is answered affirmatively
+
+The 16 real attacks carrying no keyword flag — structurally invisible to
+`wallix_rules.xml` — went from ROC-AUC 0.502 (random) to **0.963**, all ranked
+inside the top 64 of 256. Real PR-AUC 0.417 → **0.921**, precision@10 **1.00**,
+domain gap 0.288 → **0.079**. Rarity features hold the top five permutation
+importances; every shape feature is ≤ 0.008.
+
+**Known limitation, not engineered away:** training is still perfectly separable
+because the attack corpus is disjoint from the benign corpus, so 0 of 882
+generated attacks have `cmd_oov_rate == 0`. The generator cannot yet produce a
+living-off-the-land attack built entirely from ordinary commands — the hardest
+real insider case. Next realism gap.
