@@ -12,6 +12,13 @@ Les figures sont celles de visualisation/ : elles sont produites à partir des
 artefacts de train.py, donc rien ici n'est ressaisi à la main.
 
     python docs/build_rapport_etapes.py
+
+⚠️ INSTANTANÉ DU 2026-08-07, PAS UNE VUE EN DIRECT. Le TEXTE de ce script (les
+chiffres cités dans les paragraphes) est figé en dur et antérieur au correctif du
+décodeur du 2026-08-15 : relancer le script aujourd'hui régénère un PDF dont la
+narration est périmée, avec des figures à jour — la pire combinaison, parce que
+l'incohérence ne se voit pas. Avant toute réexécution, reprendre les chiffres
+depuis docs/session_2026-08-15_command_rarity.md et ml/results_all.csv.
 """
 
 from __future__ import annotations

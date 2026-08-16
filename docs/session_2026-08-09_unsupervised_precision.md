@@ -1,6 +1,15 @@
 # Session log — 2026-08-09
 ## Unsupervised data strategy for precision: analysis, decisions, and generator calibration
 
+> ⚠️ **THE NUMBERS IN THIS FILE ARE SUPERSEDED.** Every measurement here was
+> taken on command data corrupted by the decoder truncation bug found on
+> 2026-08-15 (`data="([^"]*)"` stopped at WALLIX's escaped quote; 244 of 7506
+> KBD_INPUT events cut, 21% of the distinct vocabulary, 129 of the 256 eval
+> sessions affected). The **reasoning** in this document still holds and is
+> cited by `decision_log.md` and `ml/feature_gate.py`. The **figures** are
+> replaced by `session_2026-08-15_command_rarity.md`. Do not quote this file's
+> metrics in the report.
+
 Working notes from a full session. Written in English because it feeds the French
 report and the decision log. Everything here is measured unless explicitly marked
 as a projection.

@@ -12,3 +12,21 @@ dataset_generation/commands_dataset/linuxcommands_raw.json
 # local-only project context (contains lab credentials)
 claude.md
 ml/bundles/
+
+# Derivative feature matrices. Regenerable offline by transform.py from the
+# session JSONL files, which ARE tracked -- the real telemetry
+# (ground_truth/sessions/events/eval_real.jsonl) is the irreplaceable artifact,
+# these are just its deterministic downstream. Tracking them meant every
+# regeneration showed up as a multi-megabyte diff.
+feature_extraction/out/*.SSH.csv
+feature_extraction/out/*_kmeans.csv
+feature_extraction/out/*_kmeans.json
+feature_extraction/out/kmeans_anomalies.json
+
+# Pre-restructure leftovers, referenced by no code (kept on disk, not in git).
+feature_extraction/out/features.csv
+feature_extraction/out/features_real.csv
+feature_extraction/out/features_eval_real_rf.csv
+
+# Empty live-extraction target
+feature_extraction/out/live/
