@@ -66,17 +66,22 @@ MENU_ROW_RE = re.compile(r"\|\s*(\d+)\s*\|\s*([\w.\-]+)@")
 SUDO_DENIED_RE = re.compile(r"password for [^:]+:\s*$", re.IGNORECASE)
 STEP_TIMEOUT = 15  # seconds to wait for each expected prompt
 
-# Real vaulted accounts on debian-lab (WALLIX selection menu):
-#   p_admin    - root, the only account requiring a manual second password (lab)
-#   p_dev/p_audit/p_dba - NOPASSWD sudoers, auto-connect (no second password)
-#   bastionsvc - plain non-sudo test account, auto-connect
-# Personas get their own real account (genuine per-persona command distributions,
-# real role_command_mismatch signal). Attack scenarios default to p_admin, but
-# can rotate through the NOPASSWD sudoer accounts too (--attack-accounts) --
+# Real vaulted accounts on debian-lab, as offered by the WALLIX selection menu.
+# THIS LIST IS WALLIX CONFIGURATION AND IT MOVES. Observed 2026-08-15:
+#   p_admin, p_audit, p_dba, p_dev, svc-debian
+# `bastionsvc` no longer exists -- the admin persona now maps to svc-debian.
+# Note the semantic change: bastionsvc was a plain non-sudo account, svc-debian
+# is root. The admin persona's benign commands are unchanged, but its account is
+# now privileged, so `account` is a weaker role signal than it was. Worth
+# re-checking whenever the menu changes; _select_account already fails loudly
+# with the menu it actually saw rather than hanging.
+#
+# Personas get their own real account (genuine per-persona command
+# distributions, real role_command_mismatch signal). Attack scenarios default to
+# p_admin but can rotate through the sudoer accounts (--attack-accounts) --
 # that's the actual insider-threat signal: a normal-role account doing
-# privileged things it shouldn't. bastionsvc has no sudo, so it's excluded
-# from ATTACK_CAPABLE_ACCOUNTS (root-only steps would just fail there).
-PERSONA_ACCOUNTS = {"admin": "bastionsvc", "dba": "p_dba", "dev": "p_dev", "auditor": "p_audit"}
+# privileged things it shouldn't.
+PERSONA_ACCOUNTS = {"admin": "svc-debian", "dba": "p_dba", "dev": "p_dev", "auditor": "p_audit"}
 ATTACK_ACCOUNT = "p_admin"
 ATTACK_CAPABLE_ACCOUNTS = ["p_admin", "p_dev", "p_dba", "p_audit"]
 
@@ -304,7 +309,8 @@ BURIABLE = {
 # Which persona's routine an attacker's session looks like. p_admin has no
 # persona of its own; admin traffic is the closest cover.
 ACCOUNT_PERSONA = {"p_dev": "dev", "p_dba": "dba", "p_audit": "auditor",
-                   "bastionsvc": "admin", "p_admin": "admin"}
+                   "svc-debian": "admin", "bastionsvc": "admin",
+                   "p_admin": "admin"}
 
 
 def sample_filler(persona: str, n: int, stickiness: float) -> list:
@@ -445,12 +451,16 @@ def run_session(scenario_name: str, commands: List[str], session_tag: str, accou
         # Authorization). Pick the row for `account` by ID.
         _select_account(channel, account)
 
-        # Only p_admin (root) requires a manual second password; the NOPASSWD
-        # sudoers accounts (p_dev/p_audit/p_dba) and bastionsvc auto-connect.
-        if account == ATTACK_ACCOUNT:
-            _read_until(channel, PASSWORD_RE)
+        # Some vaulted accounts prompt for a second password, others check out
+        # and connect straight to a shell. WHICH ones is WALLIX configuration,
+        # not a property of this script: p_admin required the password when this
+        # was written and stopped requiring it by 2026-08-15, at which point
+        # assuming it hung every attack session until STEP_TIMEOUT.
+        # So detect the prompt instead of predicting it.
+        _, matched = _read_until_any(channel, [PASSWORD_RE, PROMPT_RE])
+        if matched == 0:
             _send(channel, TARGET_PASS)
-        _read_until(channel, PROMPT_RE)
+            _read_until(channel, PROMPT_RE)
 
         _send(channel, f"echo TAG:{session_tag}")
         _read_until(channel, PROMPT_RE)

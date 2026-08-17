@@ -352,7 +352,22 @@ def add_rarity_features_crossfit(features: pd.DataFrame, benign_mask: pd.Series,
 def build_features(sessions_path: str, profile_path: str = "",
                    fit_profile_path: str = "", folds: int = 5,
                    seed: int = 42) -> pd.DataFrame:
-    sessions = load_sessions(sessions_path)
+    """Features from a sessions.jsonl file (batch entry point)."""
+    return build_features_from_sessions(load_sessions(sessions_path), profile_path,
+                                        fit_profile_path, folds, seed,
+                                        source=sessions_path)
+
+
+def build_features_from_sessions(sessions: pd.DataFrame, profile_path: str = "",
+                                 fit_profile_path: str = "", folds: int = 5,
+                                 seed: int = 42, source: str = "") -> pd.DataFrame:
+    """Features from an in-memory session frame.
+
+    Exists so the serving path (api/main.py) computes features with THIS code
+    rather than a re-implementation. A second feature implementation is the
+    classic source of train/serve skew: it starts identical and drifts on the
+    first bug fix applied to only one of them.
+    """
     feature_rows = [per_session_features(row) for _, row in sessions.iterrows()]
 
     features = pd.DataFrame(feature_rows)
@@ -374,7 +389,7 @@ def build_features(sessions_path: str, profile_path: str = "",
 
         commands = [normalize_commands([] if _blank(c) else c)
                     for c in merged.loc[benign_mask, "commands"]]
-        profile = command_profile.fit(commands, fitted_from=sessions_path)
+        profile = command_profile.fit(commands, fitted_from=source)
         command_profile.save(profile, fit_profile_path)
         print(f"[profile] fitted on {profile['n_sessions']} benign sessions, "
               f"{profile['n_commands']} commands, "
