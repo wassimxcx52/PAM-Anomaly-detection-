@@ -312,3 +312,66 @@ because the attack corpus is disjoint from the benign corpus, so 0 of 882
 generated attacks have `cmd_oov_rate == 0`. The generator cannot yet produce a
 living-off-the-land attack built entirely from ordinary commands — the hardest
 real insider case. Next realism gap.
+
+---
+
+## 2026-08-17 — The rule layer is measured by its own rule IDs
+
+**Problem:** `evaluation.rule_baseline()` measured the baseline from
+`transform.py`'s keyword flags — a *reimplementation* of the detection logic —
+while `events.jsonl` carried the `rule_id` that actually fired on all 7 506
+events and nothing read it. "We compared ML against our own regexes" is a
+materially weaker claim in a defence than "against the rules as deployed", and
+the data for the stronger claim was already present.
+
+**Decision: score the deployed rules from `fired_rule_ids`, and keep both
+baselines.** `build_eval_set.py` emits the fired rule IDs per session, so
+`evaluation.py` reads a column rather than opening a second file.
+`DETECTION_RULES` is the six tactic rules plus the three native-detection ones.
+Excluding `100500` (the `if_sid` anchor, which fires on 6 228 of 7 506 events),
+`100502`/`100503` (lifecycle) and `100540` (noise suppression) is load-bearing:
+counting them yields ~100% recall and measures nothing.
+
+The two baselines agree closely — **0.941/0.653 deployed vs 0.971/0.673 proxy**
+— which is itself a result, because it validates the flag-defined `flagless`
+slice the earlier headline numbers already leaned on.
+
+**Result:** the rules catch **32 of 49** attacks (recall 0.653, precision 0.941).
+Per-tactic recall is where the argument lives: **privesc 0.25**, exfil /
+log_tamper / persistence 0.62 each. `rule_miss_recovery()` then asks the only
+question that matters for deployment — of the 17 attacks the rules never saw,
+how many does each model surface inside a 50-session budget: **IsolationForest
+14/17 at median rank 30**, LightGBM 14/17 at 40, KMeans 13/17, RandomForest
+11/17.
+
+### Reproducibility gap closed
+
+`ml/unsupervised/build_eval_set.py` was documented in `GUIDE_PROJET_FR.md` but
+had never existed in git history — the 256-session evaluation set that every
+headline number rests on could not be regenerated. Reconstructed and verified
+before adoption: `--legacy-schema` reproduces the published file's sessions in
+the same order, and all 10 columns any bundle consumes match to a maximum
+absolute delta of 0. Six rows differ in `event_types`/`raw_event_count` because
+`sessions.jsonl` has been re-extracted since; neither field is referenced by
+`transform.py` or present in any bundle, and re-running both tracks confirmed
+PR-AUC unchanged at 0.9734 / 0.9645 / 0.9209 / 0.8925.
+
+### `fail_ratio` stays an evaluation dimension, deliberately
+
+`simulate_sessions.py` captures denied commands, and a refused privilege
+escalation is a genuine insider signal that trips no rule by construction. It is
+still **not** a model feature.
+
+**Real benign sessions have a 0% denial rate — 0 of 260.** All 17 denial
+sessions are attacks. So a generator calibrated on real data gives benign a
+constant `fail_ratio == 0`, and `reference_class_gate()` drops the column as a
+separator by construction — precisely the `cmd_oov_rate` failure documented
+above. Making it a feature would require inventing a benign denial rate that no
+data supports, and teaching a model "denial implies attack" from a world where
+benign is never denied is the circularity this project rejects everywhere else.
+
+**Correction to an earlier claim:** the six missed privesc attacks were *assumed*
+to be the denied-sudo sessions. Measured, only **2 of the 17** rule-missed
+attacks carry `fail_ratio > 0`; there are 9 denied sessions in the whole eval
+set, at median rank 61.5. The denial signal is real but far thinner than
+asserted, and the rule-miss recovery result above does not depend on it.

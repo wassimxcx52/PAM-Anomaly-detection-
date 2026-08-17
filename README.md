@@ -59,20 +59,30 @@ dataset_generation/   curate → calibrate → weight → generate synthetic tra
 
 ## Results
 
-Measured on the 256 isolated **real** sessions, which no model ever trained on:
+Measured on the 256 isolated **real** sessions, which no model ever trained on.
+The deployed Wazuh rules are the bar:
 
-| Track | Model | PR-AUC | P@10 | P@25 | Buried-attack P@25 |
+| Track | Model | PR-AUC | Precision | Recall | Rule-misses in top 50 |
 |---|---|---|---|---|---|
-| supervised | **LightGBM** | 0.973 | 1.00 | 1.00 | 0.64 |
-| unsupervised | **IsolationForest** | 0.964 | 1.00 | 1.00 | 0.56 |
-| supervised | RandomForest | 0.921 | 1.00 | 0.92 | 0.44 |
-| unsupervised | KMeans | 0.893 | 1.00 | 0.96 | 0.52 |
+| supervised | **LightGBM** | 0.973 | 0.74 | 1.00 | 14 / 17 |
+| unsupervised | **IsolationForest** | 0.964 | 0.93 | 0.80 | **14 / 17** |
+| supervised | RandomForest | 0.921 | 0.74 | 1.00 | 11 / 17 |
+| unsupervised | KMeans | 0.893 | 0.85 | 0.80 | 13 / 17 |
+| *baseline* | *Wazuh rules (deployed)* | — | *0.94* | *0.65* | — |
 
-The last column is the honest one. Headline P@10 is 1.00 for every model —
-obvious attacks are easy, and that number flatters all four equally. The
-*buried-attack* column scores only sessions where 1–2 malicious commands hide
-inside otherwise-benign activity, with the risk-keyword flags gated off so the
-model cannot simply re-read the rules. That is the number the report defends.
+**The rules miss 17 of 49 attacks** (recall 0.65 at precision 0.94), measured
+from the `rule_id`s that actually fired — not from a reimplementation. Per-tactic
+recall is where it bites: privesc **0.25**, exfil / log_tamper / persistence 0.62.
+
+The last column is the one the report defends: of those 17 attacks the rule layer
+never saw, how many does each model surface inside a 50-session alert budget.
+IsolationForest ranks them highest (median rank 30) despite losing the headline
+PR-AUC — and it is the preferred model, because it never trains on an attack and
+so cannot be learning that the synthetic attack corpus is merely a different
+corpus.
+
+Headline P@10 is 1.00 for all four models and therefore separates none of them;
+obvious attacks are easy.
 
 `ml/results_all.csv` holds the full metric set. Figures in
 [`visualisation/`](visualisation/).
@@ -110,6 +120,7 @@ model cannot simply re-read the rules. That is the number the report defends.
 │   ├── evaluation.py            #   SHARED metric code -- both tracks score identically
 │   ├── feature_gate.py          #   drops leaky/constant columns before training
 │   ├── persistence.py           #   bundle save/load (model + scaler + order + profile)
+│   ├── unsupervised/build_eval_set.py  # ground truth x sessions -> eval_real.jsonl
 │   ├── unsupervised/train.py    #   IsolationForest, KMeans
 │   ├── supervised/train.py      #   LightGBM, RandomForest
 │   ├── compare.py               #   cross-track comparison -> results_all.csv
@@ -153,9 +164,18 @@ model cannot simply re-read the rules. That is the number the report defends.
 - **Known limitation**: WALLIX forwards only `KBD_INPUT`, not session open/close
   lifecycle events, so `session_start`/`session_end`/`duration_sec` are best-effort
   estimates from per-session min/max timestamps (flagged via `*_is_estimated`).
-- **Not yet built**: `rule_baseline.py` (the rules-vs-ML precision/recall
-  comparison), RAG SOC copilot (Qdrant + `/ask`), `auth.py` (RBAC for the API),
-  dashboard.
+- **Rules-vs-ML baseline**: complete. The deployed rules are scored from their
+  own `rule_id`s and appear as a row in `results_all.csv`; each model reports how
+  many of the rules' 17 misses it surfaces inside the alert budget.
+- **Known limitation — `fail_ratio`**: `simulate_sessions.py` captures denied
+  commands, but real benign sessions have a 0% denial rate (0 of 260), so a
+  generated benign column would be constant and `reference_class_gate()` drops it
+  as a separator by construction. It stays an evaluation dimension rather than a
+  model feature; making it one would require inventing a benign denial rate that
+  no data supports.
+- **Not yet built**: RAG SOC copilot (Qdrant + `/ask`), `auth.py` (RBAC for the
+  API), dashboard, and the remaining contextual features (per-user z-scores,
+  24h rolling aggregates, `role_command_mismatch`).
 
 ## Setup
 
@@ -188,6 +208,7 @@ python build_training_set.py                                        # merge at 8
 
 # --- TRAIN + EVALUATE (ml/) ---
 cd ..
+python ml/unsupervised/build_eval_set.py --composed-only              # real -> eval_real.jsonl
 python ml/unsupervised/train.py                                     # IsolationForest, KMeans
 python ml/supervised/train.py                                       # LightGBM, RandomForest
 python ml/compare.py                                                # -> ml/results_all.csv
