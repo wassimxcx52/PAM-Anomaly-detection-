@@ -1,0 +1,721 @@
+\documentclass{classeENS}
+% All packages and formatting commands used by this report are loaded
+% centrally by classeENS.cls.
+
+% --- Status macros -------------------------------------------------------
+% Every technical section is tagged with its implementation status, so the
+% reader can never mistake a design intention for delivered work.
+\providecommand{\statusdone}{\textbf{[IMPLEMENTED]}}
+\providecommand{\statuspartial}{\textbf{[PARTIALLY IMPLEMENTED]}}
+\providecommand{\statusdesign}{\textbf{[DESIGNED, NOT IMPLEMENTED]}}
+
+\title{Internship Report}
+\begin{document}
+% ==============================================================================
+% 1. INFORMATIONS DU RAPPORT
+% ==============================================================================
+\titre{INTERNSHIP REPORT\\[0.5cm] \Large\normalfont \textbf{Subject:} Data, Machine Learning and Generative AI for Insider Threat Detection: An End-to-End Pipeline from Privileged Session Logs to a RAG-Powered SOC Copilot} %%[cite: 3]
+\departement{} % Left empty as requested
+\matiere{Track: Data \& AI}
+\motif{Observational Internship} %%[cite: 3]
+\enseignant{Mr. Elmahdi \textsc{CHAKIR}} %%[cite: 3]
+\eleves{} % Left empty as requested
+
+% ==============================================================================
+% 2. PAGE DE GARDE
+% ==============================================================================
+\fairepagedegarde
+
+% ==============================================================================
+% 3. PAGES PRÉLIMINAIRES
+% ==============================================================================
+\pagenumbering{roman}
+\pagestyle{plain}
+
+% --- ACKNOWLEDGEMENTS ---
+\section*{Acknowledgements}
+\addcontentsline{toc}{section}{Acknowledgements}
+We would like to express our sincere gratitude to our supervisor, Mr. Elmahdi CHAKIR, and to the entire HPS team for their guidance, availability, and technical support throughout this internship. %%[cite: 3] We would also like to thank the Cybersecurity team for their collaboration in supplying the WALLIX Bastion and Wazuh SIEM telemetry that made our Machine Learning pipeline possible. %%[cite: 3]
+\newpage
+
+% --- ABSTRACT ---
+\section*{Abstract}
+
+This report presents the design and implementation of the Data, Machine Learning, and Generative AI layers for an insider threat detection platform. While the cybersecurity infrastructure captures privileged sessions via WALLIX Bastion and enriches them in Wazuh, the Data \& AI team is responsible for transforming these raw, heterogeneous events into actionable behavioral indicators. This document details our feature engineering strategy, the machine learning methodology used to detect anomalies, and the Retrieval-Augmented Generation (RAG) layer, which indexes internal security policies and sanitized session summaries into a vector database to power a SOC analyst copilot.
+
+The delivered platform ingests real privileged SSH sessions through WALLIX Bastion into Wazuh, decodes them with a purpose-built decoder and fifteen custom correlation rules, sessionizes them into structured records, and computes behavioural features from the command sequences. A semi-synthetic training corpus of 5\,882 sessions was generated from real command content, while 256 genuinely captured sessions were held out as an isolated evaluation set that no model ever trains on. Four detectors were compared through a single shared evaluation module, and the deployed Wazuh rule layer was measured as an explicit baseline using the rule identifiers that actually fired in production.
+
+The central result is quantified: the rule layer detects 32 of 49 real attacks (recall 0.653 at precision 0.941), and is structurally blind to entire tactic classes --- privilege-escalation recall is 0.25. Of the seventeen attacks the rules never saw, the preferred unsupervised detector surfaces fourteen within a fifty-session analyst budget, at a median rank of 30 out of 256. The scoring layer is deployed as a containerised FastAPI service. The Retrieval-Augmented Generation copilot is specified in detail in this report but was not implemented within the internship period, and is reported as such throughout.
+
+\vspace{1cm}
+
+\newpage
+
+% --- TABLE OF CONTENTS ---
+\tabledematieres
+% --- LIST OF FIGURES ---
+\tabledefigure
+% --- LIST OF TABLES ---
+\tabledetableau
+
+% --- LIST OF ABBREVIATIONS ---
+\section*{List of Abbreviations}
+\addcontentsline{toc}{section}{List of Abbreviations}
+\begin{description}[leftmargin=3cm, style=nextline]
+    \item[SIEM] Security Information and Event Management %%[cite: 3]
+    \item[PAM] Privileged Access Management %%[cite: 3]
+    \item[RAG] Retrieval-Augmented Generation %%[cite: 3]
+    \item[ML] Machine Learning %%[cite: 3]
+    \item[LLM] Large Language Model %%[cite: 3]
+    \item[SOC] Security Operations Center %%[cite: 3]
+    \item[MITRE ATT\&CK] MITRE Adversarial Tactics, Techniques, and Common Knowledge %%[cite: 3]
+    \item[PR-AUC] Area Under the Precision--Recall Curve
+    \item[ROC-AUC] Area Under the Receiver Operating Characteristic Curve
+    \item[OOV] Out-Of-Vocabulary
+    \item[TF-IDF] Term Frequency -- Inverse Document Frequency
+    \item[RBAC] Role-Based Access Control
+    \item[API] Application Programming Interface
+    \item[SSH] Secure Shell
+    \item[RDP] Remote Desktop Protocol
+\end{description}
+\newpage
+
+% ==============================================================================
+% 4. CORPS DU RAPPORT
+% ==============================================================================
+\pagenumbering{arabic}
+\fairemarges
+
+% --- CHAPTER 1 ---
+\section{Introduction}
+Insider threats represent one of the hardest categories of risk for organizations to detect, precisely because they originate from users who already hold legitimate, privileged access to critical systems. %%[cite: 3] Traditional perimeter-based security controls are largely blind to this class of risk, since the attacker (or negligent user) is already authenticated and authorized. %%[cite: 3] This internship addresses this gap by designing and implementing a platform that combines Privileged Access Management (PAM) session recording, SIEM-based log correlation, behavioral Machine Learning, and a Retrieval-Augmented Generation copilot. %%[cite: 3] While the cybersecurity team handles the capture and forwarding of these logs, this report focuses on the Data and AI perspective: extracting features, training models to detect anomalous behavior, and assisting SOC analysts in investigating it through Generative AI. %%[cite: 3]
+
+% --- CHAPTER 2 ---
+\section{Problematic}
+While traditional cybersecurity systems are well-equipped to monitor external attacks, they struggle to contextualize the actions of authenticated internal users. %%[cite: 3] From a Data and AI perspective, the core challenge lies in distinguishing between legitimate administrative tasks and malicious or negligent behavior disguised within authorized sessions. %%[cite: 3]
+
+The primary problematic addressed in this project is: \textit{How can we transform raw, heterogeneous PAM and SIEM logs into structured behavioral indicators, and leverage Machine Learning alongside Large Language Models to accurately detect insider threats without overwhelming Security Operations Center (SOC) analysts with false positives?} %%[cite: 3]
+
+Solving this requires a robust data engineering pipeline to extract features from command-line behavior, the selection of appropriate anomaly-detection algorithms, and the integration of a Retrieval-Augmented Generation (RAG) system to provide rapid, contextual insights to security teams. %%[cite: 3]
+
+This problematic decomposes into four testable sub-questions, which structure the remainder of this report:
+
+\begin{enumerate}
+    \item Can raw PAM keystroke telemetry be reliably normalised into per-session behavioural records? (Section~\ref{sec:dataeng})
+    \item Which features distinguish hostile from legitimate privileged behaviour without simply re-encoding the detection rules already in place? (Section~\ref{sec:features})
+    \item Do the correlation rules already deployed in the SIEM leave a measurable detection gap, and does Machine Learning close it? (Sections~\ref{sec:ml} and~\ref{sec:results})
+    \item Can the resulting risk score be delivered to a SOC in a form an analyst can act on? (Sections~\ref{sec:serving} and~\ref{sec:rag})
+\end{enumerate}
+
+% --- CHAPTER 3 ---
+\section{Company Context}
+
+\subsection{Presentation of the Host Organization}
+
+\subsubsection{Presentation of Hightech Payment Systems (HPS)}
+HPS is a Moroccan multinational company specializing in the development of electronic-payment solutions and services for issuing and acquiring financial institutions, processors, mobile network operators, retailers, and national and regional switches worldwide. %%[cite: 3] HPS is a major player in the electronic-payment industry. Founded in 1995, it has become a global leader in its field, with solutions used in more than 90 countries. %%[cite: 3] Its products include PowerCARD, a comprehensive electronic-payment platform, and DMP, a payment-management solution. %%[cite: 3]
+
+HPS's clients include commercial banks, central banks, microfinance institutions, national and regional switches, retailers, telecommunications operators, and petroleum companies. %%[cite: 3] HPS's solutions cover the entire payment value chain, including issuing, acquiring, switching, and all payment activities on a single platform. %%[cite: 3] PowerCARD is a highly configurable solution that gives its users maximum customization and responsiveness, allowing them to adapt it to the nature of their activities and support their development. %%[cite: 3] With its ergonomic and intuitive interface, PowerCARD provides a high level of user comfort and significantly reduces the integration, development, and training costs associated with new solutions and the launch of new products. %%[cite: 3] Certified under PA-DSS and by international payment organizations including Visa, MasterCard, Diners Club, Japan Credit Bureau, American Express, and China UnionPay, PowerCARD enables global acceptance across international payment networks. %%[cite: 3]
+
+\insererfigure
+{figures/figure1.png}
+{6cm}
+{HPS shareholding in partner companies.}
+{figure1}
+
+\subsubsection{Company Organization Chart}
+HPS's organizational structure is presented in Figure~\ref{fig:figure2}, which provides an overview of the distribution of positions and functions within the company: ``an adapted organization and committed management.'' %%[cite: 3]
+
+\insererfigure
+{figures/figure2.png}
+{10cm}
+{HPS organization chart.}
+{figure2}
+
+\subsubsection{History of HPS}
+HPS was founded in 1995 by a group of Moroccan consultants and experts in electronic payments. %%[cite: 3] The company signed its first contract with the association of Moroccan banks to conduct a study on payment interoperability in Morocco. %%[cite: 3] HPS's employees then set out to achieve their objective by designing the PowerCARD solution, the result of a long-term effort intended to meet the requirements of clients in the electronic-payment sector. %%[cite: 3]
+
+In 1996, HPS signed its first contract with Société Générale Marocaine de Banques (SGMB) and soon afterward exported its technology solution to BKME Bank in Kuwait. %%[cite: 3] This already demonstrated management's intention to gain international market share while first establishing a solid base in Morocco. %%[cite: 3] In 2002, Morocco created an interbank payment center and selected PowerCARD to process all its payment activities. %%[cite: 3] In the same year, HPS upgraded PowerCARD by launching version 2 of the software. In 2003, the company obtained ISO 9001:2000 certification for all its activities. %%[cite: 3]
+
+HPS currently has 850 employees whose objective is to design and deliver comprehensive, modular, and integrated solutions. %%[cite: 3] HPS has been listed on the Casablanca Stock Exchange since 2006 and has offices in major business centers across Africa, Europe, Asia, and the Middle East. %%[cite: 3]
+
+\subsubsection{Areas of Expertise}
+HPS is a diversified company with several areas of impact and performance. %%[cite: 3] In human terms, HPS has 804 talents representing 18 nationalities, with women accounting for 30\% of its workforce. %%[cite: 3] The company emphasizes skills development through the HPS Academy. %%[cite: 3] Technologically, HPS offers PowerCARD, a modular platform that covers the entire electronic-payment value chain. %%[cite: 3] The company invests 12.4\% of its revenue in research and development and operates two R\&D centers and five data centers. %%[cite: 3] In terms of physical resources, HPS operates seven delivery centers. %%[cite: 3]
+
+From a societal perspective, the HPS Foundation supports education and professional integration, while the company has received the CGEM Corporate Social Responsibility label. %%[cite: 3] Economically, HPS is committed to reducing the use of cash, promoting financial inclusion, and preventing and controlling fraud. %%[cite: 3] Financially, HPS records MAD 833 million in revenue and MAD 82 million in operating cash flow. %%[cite: 3] The company allocates MAD 130 million to subcontracting and distributes MAD 35 million in dividends. %%[cite: 3] Socially, HPS invests MAD 365 million in salaries and benefits and has provided more than 2,000 hours of training. %%[cite: 3] Overall, HPS is a dynamic company distinguished by its commitment to technological innovation, human development, corporate social responsibility, economic performance, and social investment. %%[cite: 3]
+
+\insererfigure
+{figures/figure3.png}
+{9cm}
+{HPS activities.}
+{figure3}
+
+\subsubsection{The PowerCARD Electronic-Payment Solution}
+PowerCARD, HPS's software suite, is the platform that brings together the HPS Group's electronic-payment solutions. %%[cite: 3] It covers the entire payment value chain and enables innovative payments through an open platform capable of processing transactions initiated by any payment method and originating from any channel. %%[cite: 3] It is distinguished by high standards of security, fluidity, and electronic-transaction processing capacity. %%[cite: 3]
+
+\begin{itemize}
+    \item The PowerCARD solution offered by HPS is an integrated and modular payment software solution. %%[cite: 3]
+    \item The PowerCARD suite is used by more than 350 organizations in over 90 countries. %%[cite: 3]
+    \item It processes every type of card, including credit, debit, prepaid, corporate, loyalty, and fuel cards. %%[cite: 3] The following figure illustrates the architecture of HPS's PowerCARD solution. %%[cite: 3]
+\end{itemize}
+
+\insererfigure
+{figures/figure4.png}
+{6.2cm}
+{PowerCARD architecture.}
+{figure4}
+
+PowerCARD was designed to cover all processing transactions related to payment activities. %%[cite: 3] The solution consists of three software suites that support Back-, Middle-, and Front-Office activities. %%[cite: 3]
+
+\begin{itemize}
+    \item \textbf{Front Office:} This suite manages terminals and automated teller machines. %%[cite: 3] Its functions include security and verification, communication with acquisition channels such as point-of-sale terminals, ATMs, and the Internet, transaction collection and authorization, and the management of merchants and acquisition-terminal fleets. %%[cite: 3]
+    \item \textbf{Middle Office:} This second suite provides the link between the acquirer and the issuer for authorization granting and transaction routing within national and/or international interoperability frameworks. %%[cite: 3]
+    \item \textbf{Back Office:} This suite manages the issuance of every type of card, including credit, debit, prepaid, and loyalty cards; card personalization; merchant acquiring; national and international clearing; dispute management; reporting; and the feeding of issuer and acquirer accounting systems. %%[cite: 3]
+\end{itemize}
+
+% ==============================================================================
+% --- CHAPTER 4 : STATE OF THE ART
+% ==============================================================================
+\section{State of the Art and Positioning}
+\label{sec:sota}
+
+\subsection{Insider Threat Detection Approaches}
+The literature on insider threat detection divides broadly into three families. \textbf{Rule-based detection} encodes known-bad patterns as deterministic signatures; it is precise, explainable, and auditable, but by construction it can only detect what has already been described. \textbf{Supervised learning} trains a classifier on labelled attack and benign examples; it generalises beyond exact signatures but requires labels, which are scarce and expensive in security. \textbf{Unsupervised anomaly detection} models normal behaviour and flags deviation from it; it requires no attack labels at all, at the cost of flagging unusual-but-harmless activity.
+
+Public benchmark datasets --- notably the CERT Insider Threat corpus and the Schonlau (SEA) masquerade dataset --- are widely used for this problem. A deliberate decision was taken in this project \emph{not} to train on them, for a reason that is central to the thesis and is discussed in Section~\ref{sec:datasets}.
+
+\subsection{Reference Work}
+The methodological template for this project is the work of Chamkar \textit{et al.}, ``Improving Threat Detection in Wazuh Using Machine Learning Techniques'' (\textit{Journal of Cybersecurity and Privacy}, 2025), which proposes a hybrid Random Forest and DBSCAN architecture layered on top of a Wazuh deployment. Three adaptations were made to that template:
+
+\begin{itemize}
+    \item \textbf{DBSCAN was excluded from deployment.} The scikit-learn implementation exposes no \texttt{predict} method for unseen points, which makes it unusable in an online scoring service. KMeans was used instead where a clustering-based detector was wanted.
+    \item \textbf{The evaluation metric was changed} from ROC-AUC to precision@$k$, for the reasons developed in Section~\ref{sec:metric}.
+    \item \textbf{Isolation Forest was retained} despite underperforming in the reference study. That result is dataset-specific, and in this project's feature space the model performed strongly.
+\end{itemize}
+
+\subsection{Positioning: What Is Different Here}
+Most comparable published systems apply Machine Learning to \emph{re-rank the output of the rule engine}. Such a system inherits the rule layer's recall ceiling: an attack that trips no rule is never presented to the model, and therefore can never be detected however good the model is.
+
+This project sources its data from the Wazuh \textbf{archives} index (every event, whether or not a rule matched) rather than the \textbf{alerts} index (only rule-triggering events). This is what makes it possible to detect sessions that the rule layer never flagged, and it is what makes the comparison in Section~\ref{sec:results} meaningful rather than circular. The consequence of this decision is quantified directly: seventeen of the forty-nine real attacks in the evaluation set fire no detection rule at all, and would be invisible to any alert-sourced system.
+
+% ==============================================================================
+% --- CHAPTER 5 : ARCHITECTURE
+% ==============================================================================
+\section{Platform Architecture}
+\label{sec:architecture}
+
+\subsection{End-to-End Data Flow}
+The platform is organised as a linear pipeline in which each stage has a single responsibility and a stable output contract. This allows any stage to be replaced without disturbing its neighbours, and --- importantly for a two-team project --- allows the Data \& AI work to proceed against fixture data while the security infrastructure is still being stabilised.
+
+\begin{verbatim}
+   WALLIX Bastion (PAM)
+        |  privileged SSH session events, syslog / RFC 5424
+        v
+   Wazuh Manager   custom decoder + 15 correlation rules (100500-100540)
+        |  decoded events -> archives index -> OpenSearch
+        v
+   extract.py      pull, normalise, sessionize      -> sessions.jsonl
+        v
+   transform.py    per-session behavioural features -> features.csv
+        v
+   ml/             4-model bake-off, shared evaluation -> bundles/*.joblib
+        v
+   api/main.py     FastAPI POST /score -> ranked alert queue
+
+   -- in parallel --
+   dataset_generation/   curate -> calibrate -> generate synthetic training data
+\end{verbatim}
+
+\subsection{The Three-Stage Split and Why It Exists}
+The pipeline deliberately separates \textbf{extract}, \textbf{transform}, and \textbf{load} into distinct programs rather than a single script. The motivation is train/serve consistency: the same \texttt{transform} code must compute features at training time and at scoring time. Only the \emph{trigger} of the extract stage differs between batch operation (today) and streaming operation (future work). This is why the deployed scoring service imports the transform module directly rather than reimplementing the feature computation --- a duplicated implementation begins identical and diverges on the first bug fix applied to only one side.
+
+\subsection{Laboratory Environment}
+All work was carried out in an isolated laboratory network. Table~\ref{tab:lab} lists the components.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Component} & \textbf{Role} & \textbf{Status} \\
+\hline
+WALLIX Bastion v12.0 & PAM gateway, session capture & Operational \\
+Wazuh 4.14.5 (Docker) & SIEM: manager, indexer, dashboard & Operational \\
+Debian target host & SSH target, five vaulted accounts & Operational \\
+Windows target host & RDP target & Capture unverified \\
+\hline
+\end{tabular}
+\caption{Laboratory components and their operational status.}
+\label{tab:lab}
+\end{table}
+
+Five vaulted accounts on the Debian target were used. One (\texttt{p\_admin}) holds root privileges; three (\texttt{p\_dev}, \texttt{p\_dba}, \texttt{p\_audit}) are ordinary sudoers that prompt for a password the platform does not hold; one (\texttt{bastionsvc}) is non-privileged. This distribution was not planned, but it proved analytically valuable: an attack scenario executed through a non-privileged account produces a \emph{denied} privileged operation, which is a realistic and instructive insider signal discussed in Section~\ref{sec:failratio}.
+
+% ==============================================================================
+% --- CHAPTER 6 : DATA ENGINEERING
+% ==============================================================================
+\section{Data Engineering: From Keystrokes to Sessions}
+\label{sec:dataeng}
+\statusdone
+
+\subsection{Source Telemetry}
+WALLIX Bastion forwards privileged session activity to Wazuh over syslog. Each keystroke-level event arrives as a structured line of the following shape:
+
+\begin{verbatim}
+Jul 24 13:49:30 wab-12-0-5 sshproxy[10143]: [SSH Session]
+  session_id="19f94e38158d9f6b000c291af8a6" client_ip="192.168.1.32"
+  target_ip="192.168.1.74" user="test-ssh" device="debian-lab"
+  service="SSH" account="svc-debian" type="KBD_INPUT"
+  data="cat /etc/shadow"
+\end{verbatim}
+
+Two identity fields are present and must not be conflated: \texttt{user} is the human who authenticated to the Bastion, and \texttt{account} is the privileged identity they subsequently borrowed on the target host. The separation of these two is precisely what PAM provides and what makes attribution of privileged actions to individuals possible; it is preserved throughout the pipeline.
+
+\subsection{Custom Decoder and Correlation Rules}
+A custom Wazuh decoder was written to parse these lines into named fields, mapped onto Wazuh's standard field vocabulary (\texttt{srcuser}, \texttt{dstuser}, \texttt{dstip}, \texttt{dsthost}) plus project-specific fields (\texttt{session\_id}, \texttt{wallix\_event}, \texttt{command}).
+
+Two implementation constraints were discovered during development and are worth recording. First, Wazuh applies only the \emph{first} matching sibling child decoder; it does not accumulate fields across several. Each event shape therefore requires one comprehensive expression capturing every field, ordered most-specific-first. An initial design using one decoder per field silently extracted only the session identifier. Second, all expressions must use the PCRE2 engine: the default OS\_Regex engine supports neither word boundaries nor alternation groups, and including them prevents the analysis daemon from starting.
+
+Fifteen correlation rules were written in the reserved range 100500--100540, covering six attack tactics mapped to MITRE ATT\&CK. These rules constitute the \emph{baseline} that the Machine Learning layer is measured against in Section~\ref{sec:results}. Table~\ref{tab:rules} summarises the detection rules.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{ID} & \textbf{Level} & \textbf{Tactic} & \textbf{MITRE} \\
+\hline
+100510 & 12 & Credential access & T1003, T1552 \\
+100512 & 12 & Privilege escalation & T1548, T1136 \\
+100514 & 10 & Persistence & T1053, T1098 \\
+100516 & 12 & Log tampering & T1070, T1562 \\
+100518 & 6 & Reconnaissance & T1082, T1087 \\
+100520 & 10 & Exfiltration & T1048, T1041 \\
+\hline
+\end{tabular}
+\caption{The six tactic-detection rules, mapped to MITRE ATT\&CK techniques. A further nine rules handle session lifecycle, authentication failure, file transfer, native WALLIX detections and noise suppression.}
+\label{tab:rules}
+\end{table}
+
+\subsection{The Archives-Versus-Alerts Decision}
+\label{sec:archives}
+A decision with direct consequences for the achievable results was to source the Machine Learning pipeline from the Wazuh \textbf{archives} index rather than the \textbf{alerts} index.
+
+The alerts index contains only events that matched a rule. Training on it would impose a structural recall ceiling: the model could only ever learn to re-rank what the rules already caught. The archives index contains every decoded event, including the vast majority that match no rule --- and it is precisely those that carry the behavioural signal (command variety, vocabulary rarity, session shape).
+
+Enabling this was not trivial. Although Wazuh's \texttt{logall\_json} option was already active and writing complete archives to disk, the log shipper carries an independent \texttt{archives: enabled} toggle which defaults to false, so nothing was ever forwarded to the indexer. The consequence was measurable and initially invisible: under alert-only extraction, a five-command benign session yielded only two commands, and the session marker written by the collection driver had zero matches anywhere in the extracted output.
+
+A direct corollary of this decision concerns the use of rule identifiers as model inputs. Because the rules are the baseline being tested, feeding \texttt{rule\_id} or \texttt{rule\_level} to the model would make the comparison circular --- the model would have re-learned the rules. Rule identifiers are therefore retained strictly as \textbf{evaluation metadata} and are excluded from the feature set by an automated gate described in Section~\ref{sec:gate}.
+
+\subsection{Extraction and Sessionization}
+The extraction stage queries the Wazuh indexer, normalises each event onto the schema contract, and groups events into sessions keyed by \texttt{session\_id}, producing per-session records containing the ordered command list, lifecycle timestamps and a computed duration. Pagination uses \texttt{search\_after} to pass the ten-thousand-hit result cap, and time bounds are exposed so that historical extractions cannot leak future information into a baseline.
+
+Extraction is append-and-deduplicate by default, so repeated runs accumulate data across collection campaigns without overwriting or duplicating. A fixture mode allows the entire downstream pipeline to be developed and tested with no access to the live system, which was essential given that the two workstreams progressed in parallel.
+
+\subsection{Incident: Silent Command Truncation}
+\label{sec:truncation}
+A defect discovered late in the project is reported here in full, because it materially affected every measurement taken before its correction and because the response to it illustrates a general principle.
+
+The decoder captured the command payload with the expression \texttt{data="([\^{}"]*)"}. WALLIX, however, escapes a quotation mark occurring \emph{inside} a command as \verb|\"|, so the capture terminated at the first escaped quote. A persistence attack of the form
+
+\begin{verbatim}
+(crontab -l 2>/dev/null; echo "*/5 * * * * /tmp/x.sh") | crontab -
+\end{verbatim}
+
+reached the correlation rules as \verb|(crontab -l 2>/dev/null; echo \| --- with its entire payload discarded.
+
+The quantitative impact was disproportionate to its apparent size. Only 244 of 7\,506 keystroke events were affected (3.3\%), but those events accounted for \textbf{21\% of the distinct command vocabulary}, because quoted \texttt{awk}, \texttt{find} and \texttt{echo} one-liners are exactly the long, distinctive commands that carry the most information. \textbf{129 of the 256 evaluation sessions} contained at least one truncated command.
+
+The correction has two parts, and the second is the transferable lesson. A forward fix made the capture escape-aware. But a forward fix alone would have been worthless, because real privileged sessions cannot be re-collected --- they are records of events that happened once. Recovery was possible only because the raw log line was preserved verbatim alongside the parsed fields, allowing all 244 commands to be repaired offline from the original text. \textbf{Any future decoder correction requires a repair path, not merely a forward fix.} All measurements reported in this document post-date this repair.
+
+% ==============================================================================
+% --- CHAPTER 7 : FEATURE ENGINEERING
+% ==============================================================================
+\section{Feature Engineering}
+\label{sec:features}
+\statuspartial
+
+\subsection{Design Principle}
+The features were chosen to describe \emph{how} a session behaves rather than \emph{which} forbidden strings it contains. A feature set built from keyword matches would be a reimplementation of the correlation rules in another language, and a model trained on it could not, even in principle, detect anything the rules miss. Two families were therefore implemented.
+
+\subsubsection{Session-Shape Features}
+These describe the structure of the session independently of command content: command count, unique-command ratio, average command length, Shannon entropy of the command distribution, and session duration.
+
+A normalisation step is required before entropy is computed. WALLIX emits raw keystrokes including special keys as literal tokens, so a captured command may read \texttt{nano debconf.<TAB>} or \texttt{whoami<NL>id}. These markers are stripped on a working copy before entropy and length are computed; the raw command is retained unmodified for audit purposes. Normalisation belongs in the transform stage and not in extraction, which is deliberately lossless.
+
+\subsubsection{Command-Rarity Features}
+\label{sec:rarity}
+These are the features that distinguish this work from keyword matching. A \emph{command profile} is fitted on benign training sessions only --- a vocabulary of 1\,273 distinct command types drawn from 5\,000 benign sessions --- and each evaluation session is scored against it along five dimensions: out-of-vocabulary rate, mean and maximum surprisal, and mean and maximum cosine novelty in TF-IDF space.
+
+These features ask ``how unusual is this vocabulary relative to normal work?'' rather than ``does this command appear on a list?'' They proved to be the strongest predictors in the study, holding the top permutation-importance positions, with every shape feature below 0.008.
+
+A subtlety governs how the profile is fitted. Scoring a training session against a profile built from that same session produces perfect, meaningless separation. The profile is therefore cross-fitted, and the fitted profile is embedded in the deployed model bundle so that scoring at serving time uses exactly the vocabulary the model was trained against.
+
+\subsection{The Feature Gate}
+\label{sec:gate}
+Not every computed feature is fit to be a model input, and the decision is made automatically rather than by hand. Three gates are applied.
+
+The \textbf{leak gate} unconditionally removes columns that encode the answer: the label itself, generation metadata such as attack composition, and --- per Section~\ref{sec:archives} --- rule identifiers and levels.
+
+The \textbf{domain gate} removes columns that are constant, or nearly constant, in either the training set or the evaluation set. A constant column cannot rank anything. This gate is responsible for a significant and honestly-reported reduction: of nineteen candidate features, nine are dropped because they are degenerate on real evaluation data. All source-IP and temporal features fall here, for the laboratory reason given in Section~\ref{sec:limits}: sessions were collected from a single source address within a single working period, so those columns carry no variance to learn from.
+
+The \textbf{reference-class gate} is the most subtle and was added in response to an observed failure. A column may vary across the training set as a whole while being identically valued for every \emph{benign} training row --- which is worse than useless, because it hands the model a perfect separator by construction rather than one it learned. The case that motivated it: the out-of-vocabulary rate was exactly zero for all 5\,000 generated benign sessions, because the generator draws from a closed vocabulary and the profile was fitted on that same vocabulary. Real benign behaviour, drawn from open human activity, has a 1.4\% out-of-vocabulary rate. A model trained on that column would learn ``any unknown command implies attack'' --- true in the generated world, false in the real one, and every real benign session using an unlisted command becomes a false positive. The generator was corrected to introduce vocabulary novelty through varied \emph{arguments} rather than novel programs, which is how real novelty actually arises.
+
+Ten features survive all three gates and constitute the deployed model input, listed in Table~\ref{tab:features}.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Feature} & \textbf{Family} \\
+\hline
+\texttt{duration\_sec\_feat} & Session shape \\
+\texttt{command\_count} & Session shape \\
+\texttt{unique\_command\_ratio} & Session shape \\
+\texttt{avg\_command\_length} & Session shape \\
+\texttt{command\_entropy} & Session shape \\
+\texttt{cmd\_oov\_rate} & Command rarity \\
+\texttt{cmd\_mean\_surprisal} & Command rarity \\
+\texttt{cmd\_max\_surprisal} & Command rarity \\
+\texttt{cmd\_mean\_novelty} & Command rarity \\
+\texttt{cmd\_max\_novelty} & Command rarity \\
+\hline
+\end{tabular}
+\caption{The ten features that survive all three gates and are consumed by every deployed model bundle.}
+\label{tab:features}
+\end{table}
+
+\subsection{Features Specified but Not Implemented}
+This section is marked \statuspartial{} because a planned family of contextual features was specified and not built within the internship period. These are: per-user hour and duration $z$-scores against an incrementally-maintained baseline, twenty-four-hour rolling aggregates (distinct targets, session counts, distinct source addresses), and role--command mismatch. They require a per-user baseline store with an explicit as-of bound to prevent future leakage, which is a component in its own right. They are recorded in Section~\ref{sec:future} as the highest-value next increment.
+
+% ==============================================================================
+% --- CHAPTER 8 : DATASET
+% ==============================================================================
+\section{Dataset Construction}
+\label{sec:datasets}
+\statusdone
+
+\subsection{The Governing Rule: Generated Trains, Real Judges}
+The single most important methodological commitment in this project is that \textbf{synthetic data is used only for training, and genuinely captured sessions are used only for evaluation}. The two sets never mix. Every headline number in Section~\ref{sec:results} is measured on real sessions that no model has ever seen.
+
+This rule exists because the alternative is a well-known way to produce impressive and meaningless results. A model evaluated on synthetic data measures how well it learned the generator, not how well it detects attacks.
+
+\subsection{Why Not a Public Dataset}
+Public corpora such as Schonlau/SEA and CERT were deliberately not used as primary training data. The thesis of this project is that \emph{PAM-mediated identity resolution plus behavioural modelling} detects insiders; training on a corpus that never passed through a PAM gateway would abandon the identity dimension that constitutes the contribution.
+
+Public sources were nevertheless used correctly, as \emph{content}. Attack command vocabulary was sourced independently from Atomic Red Team and GTFOBins, expanding the corpus from 16 to 256 distinct commands across all six tactics. This independent sourcing is what makes the rules-versus-ML comparison credible: had the attack commands been written by the same person who wrote the correlation rules, the rules would necessarily have detected them, and the comparison would have measured nothing.
+
+\subsection{Real Session Collection}
+A collection driver was implemented to execute genuine, labelled, self-cleaning sessions through the Bastion. The driver authenticates as a real user at the SSH protocol level, navigates WALLIX's interactive account-selection menu, and executes a scripted scenario, recording one ground-truth record per session.
+
+Joining ground truth back to telemetry required solving an identity problem: WALLIX assigns its own opaque session identifier and has no knowledge of which scenario the driver was executing. The solution was to make each session announce itself --- the driver's first command is \texttt{echo TAG:<tag>}, which travels the entire pipeline as ordinary keystroke telemetry and provides the join key.
+
+Six attack scenarios were implemented (reconnaissance, credential access, privilege escalation, persistence, log tampering, exfiltration), all self-cleaning or read-only, alongside four benign personas (administrator, database administrator, developer, auditor). In total, 413 real sessions were collected, of which 256 form the isolated evaluation set.
+
+\subsection{Semi-Synthetic Training Corpus}
+The training corpus of 5\,882 sessions (5\,000 benign, 882 attack) was generated at a benign-to-attack ratio of 85:15, chosen to reflect realistic Security Operations Centre conditions rather than a balanced dataset.
+
+Generation is calibrated rather than invented: per-persona command frequencies are measured from real benign sessions and used to weight the sampling vocabulary, and three generator parameters (repetition stickiness, length tilt, argument variation) are fitted against real behaviour. Approximately 70\% of generated attacks use a \emph{buried} composition, in which one or two malicious commands are hidden inside otherwise-benign activity --- the realistic case, and the one on which detection is hardest.
+
+A safety layer prevents destructive commands from entering the corpus, since the same command inventory drives sessions executed against a live laboratory host.
+
+\subsection{Reproducibility of the Evaluation Set}
+The evaluation set is the artefact on which every reported number depends. During the project it was discovered that the script producing it had been documented but never committed --- the 256-session evaluation set could not be regenerated from source. This was corrected, and the reconstruction was verified before adoption rather than assumed: the rebuilt file reproduces the original sessions in the same order, and all ten columns consumed by any model bundle match to a maximum absolute difference of zero.
+
+% ==============================================================================
+% --- CHAPTER 9 : ML METHODOLOGY
+% ==============================================================================
+\section{Machine Learning Methodology}
+\label{sec:ml}
+\statusdone
+
+\subsection{Two Complementary Tracks}
+Two detection questions were posed, answered by two model families over one shared feature matrix.
+
+The \textbf{unsupervised track} asks \emph{is this session abnormal?} It fits on benign sessions only and outputs an anomaly score. Isolation Forest and KMeans were compared.
+
+The \textbf{supervised track} asks \emph{is this a known attack, and of which type?} It fits on the labelled generated mixture. LightGBM and Random Forest were compared.
+
+The unsupervised track is designated the primary one, for a reason that must be stated plainly because it constrains the conclusions: the supervised models train on \emph{synthetic} attacks, and no generated attack session is free of at least one unseen command. Part of what a supervised model learns is therefore ``the attack corpus is a different corpus'' rather than ``this behaviour is hostile.'' The unsupervised models never see an attack at all and cannot inherit that particular bias. Where the two tracks are close, the unsupervised model is preferred.
+
+Class imbalance is handled by loss re-weighting rather than SMOTE: at 85:15 the imbalance is mild, and re-weighting achieves the same effect without synthesising feature-space points corresponding to no session that could exist.
+
+\subsection{The Evaluation Metric}
+\label{sec:metric}
+\textbf{Accuracy is not reported}, and the reason is arithmetic: at the evaluation set's 19.1\% attack base rate, a detector that labels every session benign scores 80.9\% accuracy while detecting nothing.
+
+The headline metric is \textbf{precision@$k$}, where $k$ is the alert budget a Security Operations Centre can actually process. This measures the operationally relevant quantity: of the $k$ sessions an analyst has time to open, how many were genuine attacks. ROC-AUC is reported for continuity with the literature but is not used to select models, as it is optimistic under heavy class imbalance.
+
+A further constraint governs cross-model comparison: each detector emits a score in a different and incomparable unit --- distance to a centroid, isolation depth, class probability. Only the \emph{ranking} is comparable, which is why precision@$k$ and PR-AUC carry the comparison and any fixed-threshold confusion matrix is reported for context only.
+
+\subsection{Shared Evaluation Code}
+All four models are scored by a single shared evaluation module. This is a methodological safeguard rather than a convenience: the two tracks train on different data, and if each script computed its own metrics, an observed difference between models could be a difference in how they were measured rather than in how they performed.
+
+\subsection{Model Persistence}
+A trained model alone is not a deployable artefact. What is persisted is a \emph{bundle} containing the fitted estimator, the fitted scaler, the exact feature ordering, the command profile, the alert threshold, and the metrics achieved at build time. The feature ordering matters because estimators index columns positionally: a frame with correct columns in the wrong order produces confident and entirely wrong scores, with no error raised.
+
+% ==============================================================================
+% --- CHAPTER 10 : RESULTS
+% ==============================================================================
+\section{Results}
+\label{sec:results}
+\statusdone
+
+All results in this section are measured on the 256 isolated real sessions (49 attacks, 207 benign) which no model trained on.
+
+\subsection{The Rule-Layer Baseline}
+Before any model can be said to add value, the incumbent must be measured. The deployed correlation rules were evaluated using the rule identifiers that \emph{actually fired in Wazuh} --- not a reimplementation of the rule logic. A session is counted as detected if any of the nine detection rules fired on it; the base anchor rule, the two session-lifecycle rules and the noise-suppression rule are excluded, since counting them would yield near-total recall and measure nothing.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Baseline} & \textbf{Precision} & \textbf{Recall} & \textbf{Attacks missed} \\
+\hline
+Wazuh rules (as deployed) & 0.941 & 0.653 & 17 of 49 \\
+Keyword-flag proxy & 0.971 & 0.673 & 16 of 49 \\
+\hline
+\end{tabular}
+\caption{The rule layer's own performance on the real evaluation set. The close agreement between the deployed rules and their feature-space proxy is itself a validation result.}
+\label{tab:baseline}
+\end{table}
+
+The rule layer is \textbf{precise but incomplete}: when it fires it is almost always right (0.941), but it misses just over a third of all attacks. This is the expected and correct behaviour of a signature system, and it is the gap the Machine Learning layer exists to close.
+
+Per-tactic recall localises the blindness, and is more informative than the aggregate.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Tactic} & \textbf{Rule recall} & \textbf{Attacks missed} \\
+\hline
+Reconnaissance & 0.89 & 1 \\
+Credential access & 0.88 & 1 \\
+Exfiltration & 0.62 & 3 \\
+Log tampering & 0.62 & 3 \\
+Persistence & 0.62 & 3 \\
+\textbf{Privilege escalation} & \textbf{0.25} & \textbf{6} \\
+\hline
+\end{tabular}
+\caption{Rule-layer recall by MITRE tactic. Privilege escalation is the structural weak point.}
+\label{tab:tactic}
+\end{table}
+
+Privilege escalation --- arguably the tactic of greatest concern in a PAM context --- is detected in only one case in four.
+
+\subsection{Model Comparison}
+Table~\ref{tab:results} presents the four-model bake-off with the rule layer included as a baseline row.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|c|c|c|c|}
+\hline
+\textbf{Track} & \textbf{Model} & \textbf{PR-AUC} & \textbf{Precision} & \textbf{Recall} & \textbf{Rule-miss} \\
+\hline
+Supervised & LightGBM & 0.973 & 0.74 & 1.00 & 14 / 17 \\
+Unsupervised & Isolation Forest & 0.964 & 0.93 & 0.80 & 14 / 17 \\
+Supervised & Random Forest & 0.921 & 0.74 & 1.00 & 11 / 17 \\
+Unsupervised & KMeans & 0.893 & 0.85 & 0.80 & 13 / 17 \\
+\hline
+\textit{Baseline} & \textit{Wazuh rules} & --- & \textit{0.94} & \textit{0.65} & --- \\
+\hline
+\end{tabular}
+\caption{Four-model comparison on the isolated real evaluation set. ``Rule-miss'' is the number of the seventeen rule-invisible attacks surfaced within a fifty-session alert budget.}
+\label{tab:results}
+\end{table}
+
+\subsection{The Decisive Measurement}
+Precision@10 is 1.00 for all four models and therefore \textbf{separates none of them}. Obvious attacks are easy, and any headline metric dominated by them flatters every model equally. The measurement that decides the question is the final column of Table~\ref{tab:results}: of the seventeen attacks the deployed rules never saw, how many does each model surface within an analyst's alert budget?
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Model} & \textbf{In top 50 of 256} & \textbf{Median rank} \\
+\hline
+Isolation Forest & 14 / 17 & \textbf{30} \\
+LightGBM & 14 / 17 & 40 \\
+KMeans & 13 / 17 & 33 \\
+Random Forest & 11 / 17 & 45 \\
+\hline
+\end{tabular}
+\caption{Rule-miss recovery: where each model ranks the attacks the rule layer is blind to.}
+\label{tab:recovery}
+\end{table}
+
+Isolation Forest ranks the rule-invisible attacks highest, at a median position of 30 out of 256, despite losing the headline PR-AUC comparison to LightGBM. Since it is also the model that never trains on an attack --- and therefore cannot be exploiting the synthetic-corpus artefact described in Section~\ref{sec:ml} --- it is the model selected for deployment.
+
+\subsection{Answering the Thesis Question}
+The results support the project's central claim in a directly measurable form:
+
+\begin{itemize}
+    \item The deployed rules detect 32 of 49 real attacks (recall 0.653), and are structurally blind to 17 of them.
+    \item Privilege escalation, the highest-concern tactic in a PAM context, is detected at a recall of 0.25.
+    \item The selected unsupervised model surfaces 14 of those 17 rule-invisible attacks within a fifty-session budget.
+\end{itemize}
+
+The rules and the model are therefore \textbf{complementary, not competing}. The rules provide high-precision, explainable, auditable detection of known-bad patterns; the model provides recall over behaviour no signature describes. The correct architecture runs both, which is what the platform does.
+
+% ==============================================================================
+% --- CHAPTER 11 : SERVING
+% ==============================================================================
+\section{Serving Layer}
+\label{sec:serving}
+\statusdone
+
+\subsection{The Scoring Service}
+The selected model bundle is served by a containerised FastAPI application exposing three endpoints: \texttt{POST /score} accepts sessions and returns them ranked by anomaly score with the feature values behind each decision; \texttt{GET /model} reports which bundle is loaded and the metrics it achieved when built; \texttt{GET /health} provides a liveness probe.
+
+The \texttt{/model} endpoint deserves comment. The first question asked when a live score looks wrong is ``which model is this, and how good was it?'', and answering that should not require access to the source repository. The bundle therefore carries its own build-time metrics, and the service exposes them.
+
+\subsection{Preventing Train/Serve Skew}
+The service computes features by importing the same transform module that produced the training matrix. The image consequently ships the feature-engineering code and not merely a serialised model. This is the correct trade: the deployable artefact is not the model but the tuple of model, scaler, feature ordering and command profile, and the code producing those features is part of that contract.
+
+Dependency versions are pinned to those used at training time, because a serialised estimator deserialises against whatever library version is installed, and a mismatch either raises an error or --- considerably worse --- silently loads an estimator whose internals changed meaning between versions.
+
+\subsection{Refusing to Score Rather Than Imputing}
+If any required feature cannot be computed, the service returns an error rather than substituting a default. The case that motivates this is a session carrying no command telemetry, such as an RDP session under the current decoder. An imputed zero would score as ``perfectly ordinary'' --- the most dangerous possible failure direction for an anomaly detector, since it converts missing data into a confident assertion of normality.
+
+\subsection{Security Posture}
+The service currently has \textbf{no authentication}, and this is stated explicitly rather than glossed over. Role-based access control is a security-team deliverable and was not built. Because \texttt{/score} returns privileged session content, the container publishes only to the loopback interface and must not be exposed on a routable address until access control exists.
+
+% ==============================================================================
+% --- CHAPTER 12 : RAG
+% ==============================================================================
+\section{Retrieval-Augmented Generation SOC Copilot}
+\label{sec:rag}
+\statusdesign
+
+This section describes a component that was \textbf{specified but not implemented} within the internship period. It is presented as a design with its constraints resolved, so that it can be built without re-deciding them.
+
+\subsection{Purpose}
+A ranked queue of anomalous sessions tells an analyst \emph{what} to look at but not \emph{what it means}. The copilot's role is to answer natural-language questions --- ``why was this session flagged?'', ``what does our policy require when a privileged account touches the credential store?'' --- with answers grounded in retrieved documents and accompanied by citations.
+
+\subsection{Proposed Architecture}
+A vector database holding two separate collections:
+
+\begin{itemize}
+    \item \texttt{soc\_policies} --- internal security policies, ISO 27001 and SOC 2 control descriptions, MITRE ATT\&CK technique documentation and incident-response runbooks. Curated by the security team, essentially static.
+    \item \texttt{session\_history} --- one sanitised natural-language summary per scored session, written by the load stage of the pipeline.
+\end{itemize}
+
+Retrieval is performed over both collections and passed to a language model with a citation-enforcing prompt, exposed as \texttt{POST /ask} alongside the existing scoring endpoint.
+
+\subsection{The Governing Constraint: Never Embed Raw Commands}
+The critical design decision is that \texttt{session\_history} stores \textbf{sanitised summaries, never raw command text}. Privileged sessions can and do contain credentials --- a mistyped password echoed into a shell, a token passed on a command line. Embedding raw session content into a vector store would place those secrets into a system designed for broad retrieval, and embeddings are not reliably reversible into a form from which a secret can be deleted on request.
+
+Sessions are therefore gated by an explicit indexability flag, and only sanitised summaries are indexed. This constraint is the reason the component was scoped as a design rather than rushed to implementation: a hastily-built version that indexed raw sessions would be an active data-protection liability rather than an incomplete feature.
+
+\subsection{Additional Requirements}
+Every query to \texttt{/ask} must be written to an audit log, since the copilot mediates access to privileged session content. Retention policy for \texttt{session\_history} remains an open governance question. Should Active Directory integration be added, real user names become personal data, which strengthens both the sanitisation and retention requirements.
+
+% ==============================================================================
+% --- CHAPTER 13 : IMPLEMENTATION STATUS
+% ==============================================================================
+\section{Implementation Status}
+\label{sec:status}
+
+This section states precisely which components were delivered, which were partially delivered, and which remain specified but unbuilt. It is provided so that no claim in this report can be mistaken for an intention.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Component} & \textbf{Status} \\
+\hline
+WALLIX $\rightarrow$ Wazuh syslog integration & Implemented \\
+Custom WALLIX decoder (PCRE2, escape-aware) & Implemented \\
+Fifteen correlation rules, MITRE-mapped & Implemented \\
+Archives-index sourcing & Implemented \\
+Real session collection driver (SSH) & Implemented \\
+Extraction and sessionization & Implemented \\
+Feature engineering: shape family & Implemented \\
+Feature engineering: command-rarity family & Implemented \\
+Three-stage automated feature gate & Implemented \\
+Attack corpus curation (Atomic Red Team, GTFOBins) & Implemented \\
+Generator calibration against real behaviour & Implemented \\
+Semi-synthetic corpus, 5\,882 sessions at 85:15 & Implemented \\
+Isolated evaluation set, reproducible & Implemented \\
+Four-model bake-off, shared evaluation & Implemented \\
+Rule-layer baseline from fired rule identifiers & Implemented \\
+Rule-miss recovery measurement & Implemented \\
+Model bundle persistence & Implemented \\
+Command-line scoring tool & Implemented \\
+FastAPI scoring service, containerised & Implemented \\
+\hline
+Denied-command signal (\texttt{fail\_ratio}) & Partial: evaluation only \\
+Report figures & Partial: require regeneration \\
+\hline
+Contextual features ($z$-scores, 24h aggregates) & Specified, not built \\
+Role--command mismatch feature & Specified, not built \\
+RDP capture verification & Specified, not built \\
+FTP support (all layers) & Specified, not built \\
+RAG copilot and \texttt{/ask} endpoint & Specified, not built \\
+Authentication and RBAC & Specified, not built \\
+Analyst dashboard & Specified, not built \\
+Active Directory integration & Deferred by decision \\
+\hline
+\end{tabular}
+\caption{Component-by-component implementation status at the end of the internship period.}
+\label{tab:status}
+\end{table}
+
+% ==============================================================================
+% --- CHAPTER 14 : LIMITATIONS
+% ==============================================================================
+\section{Limitations}
+\label{sec:limits}
+
+These limitations are documented rather than engineered away, since a result whose boundaries are stated is more useful than one whose boundaries are hidden.
+
+\subsection{Laboratory Scale}
+The environment comprises two target hosts, so \textbf{no genuine lateral movement} exists in the data. Synthesising fake lateral movement was considered and rejected: it would produce a detector validated against a phenomenon the dataset does not contain.
+
+All sessions originate from a \textbf{single source address} within a limited time window. This is the direct cause of the nine features dropped by the domain gate: source-IP and temporal features have no variance to learn from. Their absence is reported rather than concealed, and it means the deployed model currently detects anomaly in \emph{command behaviour} only.
+
+\subsection{Semi-Synthetic Training Data}
+Training data is generated, and the report describes it as semi-synthetic throughout. Its command content derives from real sources and its distributions are calibrated against real behaviour, but it remains generated. This is the reason the evaluation set is real and strictly isolated, and the reason the domain gap between generated-holdout and real-evaluation performance is measured and reported rather than assumed to be negligible.
+
+\subsection{Perfect Separability of the Training Corpus}
+Training data is perfectly separable, because the attack corpus is disjoint from the benign corpus: no generated attack session is free of at least one unseen command. The generator cannot yet produce a living-off-the-land attack constructed entirely from ordinary commands --- which is the hardest and most realistic insider case. This is the single largest realism gap remaining, and it is the reason the unsupervised track is preferred over the supervised one.
+
+\subsection{The Denied-Command Signal}
+\label{sec:failratio}
+The collection driver records commands denied for insufficient privilege, and a refused privilege escalation is a genuine insider signal that trips no correlation rule by construction. It was nevertheless \textbf{not} promoted to a model feature.
+
+The reason is instructive. Real benign sessions in this laboratory have a denial rate of exactly zero --- 0 of 260 --- because benign personas never attempt privileged operations. A generator calibrated on that figure would produce benign sessions with a constant zero, and the reference-class gate of Section~\ref{sec:gate} would correctly reject the column as a separator by construction. Making it a feature would require inventing a benign denial rate that no observation supports, and teaching a model that ``denial implies attack'' from a world in which benign users are never denied is precisely the circularity this project rejects elsewhere. The signal is therefore reported as an evaluation dimension only. Measurement confirms it is thin: only 2 of the 17 rule-missed attacks involve a denied command.
+
+\subsection{Protocol Coverage}
+Only SSH is fully supported. RDP telemetry reaches Wazuh but the decoder has not been verified against a genuine RDP line, whose event shape may be session or application-launch events rather than keystroke input. FTP is unsupported at every layer. The scoring service refuses rather than guesses on sessions lacking command telemetry, so this limitation degrades coverage without corrupting results.
+
+\subsection{Report Figures}
+The figure-generation script targets artefacts from an earlier iteration of the pipeline and does not execute against the current outputs. The numerical results in this report are drawn directly from the results table produced by the current bake-off; the figures require regeneration before inclusion.
+
+% ==============================================================================
+% --- CHAPTER 15 : CONCLUSION
+% ==============================================================================
+\section{Conclusion and Future Work}
+\label{sec:future}
+
+\subsection{Conclusion}
+This internship delivered an operational pipeline carrying privileged session telemetry from a WALLIX Bastion, through a Wazuh SIEM with purpose-built decoding and correlation, into a feature-engineering stage, a four-model machine-learning comparison, and a containerised scoring service.
+
+The project's central question was whether the correlation rules already deployed are sufficient, and whether behavioural machine learning detects what they cannot. The question is answered affirmatively and quantitatively. The rules are precise but incomplete: recall 0.653 at precision 0.941, blind to seventeen of forty-nine real attacks, and detecting privilege escalation --- the tactic of greatest concern under Privileged Access Management --- at a recall of only 0.25. The selected unsupervised detector surfaces fourteen of those seventeen rule-invisible attacks within a fifty-session analyst budget, at a median rank of 30 out of 256.
+
+Equally important is what the project declined to do. Public datasets were not used as primary training data, because doing so would have abandoned the identity dimension that PAM uniquely provides. Rule identifiers were excluded from the feature set, because including them would have made the comparison circular. Denied-command data was not promoted to a feature, because the supporting benign distribution does not exist. Synthetic sessions were never evaluated on. Each of these decisions reduces the headline numbers that could have been reported, and each is what makes the numbers that \emph{are} reported defensible.
+
+\subsection{Future Work}
+In order of expected value:
+
+\begin{enumerate}
+    \item \textbf{Contextual and temporal features.} Per-user $z$-scores and rolling aggregates require a baseline store with an explicit as-of bound. This is the largest available improvement to detection quality, and it directly addresses the nine features currently dropped by the domain gate.
+    \item \textbf{Living-off-the-land attack generation.} Producing attack sessions built entirely from ordinary commands would remove the perfect separability of the training corpus and address the principal realism gap.
+    \item \textbf{Authentication for the scoring service.} Required before any deployment beyond the laboratory.
+    \item \textbf{The RAG copilot} as specified in Section~\ref{sec:rag}, with the sanitisation constraint enforced from the outset.
+    \item \textbf{Protocol coverage:} verification of RDP decoding against genuine telemetry, then FTP support.
+    \item \textbf{Active Directory integration}, which would supply authentic per-user baselines and genuine role definitions, replacing the four synthetic personas with real organisational identities.
+\end{enumerate}
+
+\subsection{Personal Assessment}
+The technical difficulty of this project lay less in model selection than in data integrity. The decisive interventions were the discovery that the archives index was never being shipped, the discovery that a single unescaped character in a regular expression was silently discarding a fifth of the command vocabulary, and the construction of automated gates preventing leaked or degenerate columns from reaching a model. In each case the observable symptom was not an error but a plausible-looking number. The most valuable lesson of the internship is that in security machine learning, the failure mode to guard against is not the model that breaks --- it is the model that quietly reports an excellent result for the wrong reason.
+
+\end{document}
