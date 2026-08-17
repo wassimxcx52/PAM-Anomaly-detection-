@@ -1,0 +1,4 @@
+
+# scoring image build context: keep venv and data out
+venv/
+**/__pycache__/

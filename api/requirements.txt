@@ -1,0 +1,14 @@
+# Versions are PINNED to the ones that fitted the bundles. A joblib bundle
+# unpickles against whatever scikit-learn is installed, and a mismatch either
+# raises on load or -- worse -- loads an estimator whose internals changed
+# meaning between versions. Re-pin whenever the training environment moves.
+scikit-learn==1.9.0
+numpy==2.4.6
+pandas==3.0.5
+joblib==1.5.3
+lightgbm==4.7.0
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+pydantic==2.13.4
+requests==2.34.2
