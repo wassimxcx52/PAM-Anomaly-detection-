@@ -230,6 +230,41 @@ def rule_id_baseline(eval_df: pd.DataFrame, y_true: np.ndarray) -> dict:
     return result
 
 
+def rule_miss_recovery(eval_df: pd.DataFrame, y_true: np.ndarray,
+                       score: np.ndarray, budget: int = 50) -> dict:
+    """Of the attacks the DEPLOYED rules missed, where does this model rank them?
+
+    This is the project's thesis reduced to one number. Everything else compares
+    models to each other; this compares the model to the rule layer on precisely
+    the population the rule layer cannot see -- the attacks that fired no
+    detection rule at all. A model that scores well everywhere except here has
+    added nothing to what Wazuh already does.
+
+    Distinct from the `flagless` slice: that one is defined by transform.py's
+    keyword flags (a proxy, available on generated data), this one by the rule
+    IDs that actually fired in production.
+    """
+    fired = _fired_detection_rule(eval_df)
+    if fired is None:
+        return {}
+    missed = (y_true == 1) & ~fired.astype(bool)
+    if not missed.any():
+        return {}
+
+    # Rank over ALL sessions: an analyst works one queue, not a filtered one.
+    order = pd.Series(score).rank(ascending=False, method="min").to_numpy()
+    ranks = np.sort(order[missed])
+
+    return {
+        "n": int(missed.sum()),
+        "in_budget": int((ranks <= budget).sum()),
+        "budget": budget,
+        "median_rank": float(np.median(ranks)),
+        "best_rank": int(ranks[0]),
+        "worst_rank": int(ranks[-1]),
+    }
+
+
 def report_baselines(eval_df: pd.DataFrame, y_true: np.ndarray) -> dict:
     """Print both baselines side by side and return them for the results table."""
     flags = rule_baseline(eval_df, y_true)
@@ -299,6 +334,16 @@ def evaluate(model_name: str, eval_df: pd.DataFrame, y_true: np.ndarray,
         print(f"\nRanks of the flagless attacks in the {len(y_true)}-session "
               f"queue: {hit_ranks}")
         row["flagless_worst_rank"] = hit_ranks[-1]
+
+    recovery = rule_miss_recovery(eval_df, y_true, score)
+    if recovery:
+        print(f"\nRULE-MISS RECOVERY -- the {recovery['n']} attacks the deployed "
+              f"rules never saw:")
+        print(f"  {recovery['in_budget']} of {recovery['n']} ranked in the top "
+              f"{recovery['budget']} of {len(y_true)} sessions "
+              f"(median rank {recovery['median_rank']:.0f}, "
+              f"best {recovery['best_rank']}, worst {recovery['worst_rank']})")
+        row.update({f"rulemiss_{k}": v for k, v in recovery.items()})
 
     return row
 

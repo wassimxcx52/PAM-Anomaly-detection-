@@ -46,7 +46,8 @@ OUT = os.path.join(HERE, "results_all.csv")
 COLUMNS = ["track", "model", "headline_pr_auc", "headline_precision",
            "headline_recall", "headline_p@10", "headline_p@25",
            "clean_pr_auc", "clean_p@10", "flagless_roc_auc", "flagless_p@25",
-           "flagless_worst_rank", "domain_gap"]
+           "flagless_worst_rank", "rulemiss_in_budget", "rulemiss_median_rank",
+           "domain_gap"]
 
 
 def rule_layer_row() -> dict | None:
