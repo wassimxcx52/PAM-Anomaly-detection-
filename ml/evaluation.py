@@ -40,6 +40,9 @@ Binary predictions come from each model's own threshold convention.
 
 from __future__ import annotations
 
+import collections
+import re
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -59,6 +62,15 @@ ARTIFACT_ACCOUNT = "p_admin"
 
 FLAG_FEATURES = ["flag_cred_access", "flag_privesc", "flag_persistence",
                  "flag_log_tamper", "flag_recon", "flag_exfil"]
+
+# The rules in wallix_rules.xml that assert "this session did something bad".
+# The other reserved IDs are deliberately NOT here and the distinction carries
+# the whole measurement: 100500 is the base if_sid anchor and fires on 6228 of
+# 7506 events, 100502/100503 are session open/close lifecycle, 100540 suppresses
+# GUI polling noise. Counting any of them as a detection yields ~100% recall and
+# measures nothing.
+DETECTION_RULES = {100510, 100512, 100514, 100516, 100518, 100520,
+                   100530, 100532, 100534}
 
 
 def precision_at_k(y_true: np.ndarray, score: np.ndarray, k: int) -> tuple:
@@ -154,6 +166,101 @@ def rule_baseline(eval_df: pd.DataFrame, y_true: np.ndarray) -> dict:
         "recall": recall_score(y_true, fired, zero_division=0),
         "missed": missed,
     }
+
+
+def _fired_detection_rule(eval_df: pd.DataFrame) -> np.ndarray | None:
+    """Per session: did any DETECTION_RULES rule fire? None if unavailable.
+
+    The column is a list per row (built by build_eval_set.py); it survives a CSV
+    round-trip as its repr, so parse defensively rather than assuming a list.
+    """
+    if "fired_rule_ids" not in eval_df.columns:
+        return None
+
+    def hit(value) -> bool:
+        if isinstance(value, str):
+            found = {int(n) for n in re.findall(r"\d+", value)}
+        elif isinstance(value, (list, tuple, set)):
+            found = {int(n) for n in value}
+        else:
+            return False
+        return bool(found & DETECTION_RULES)
+
+    return eval_df["fired_rule_ids"].map(hit).to_numpy()
+
+
+def rule_id_baseline(eval_df: pd.DataFrame, y_true: np.ndarray) -> dict:
+    """The DEPLOYED rule layer's precision/recall, from the rule IDs that
+    actually fired in Wazuh.
+
+    This is the number the thesis rests on, and it is deliberately kept separate
+    from rule_baseline() above. That one measures transform.py's keyword flags --
+    a reimplementation of the detection logic, useful because it is available on
+    generated sessions too. This one measures wallix_rules.xml as deployed. When
+    the two agree, the flag-based slices are validated; if they ever diverge, the
+    rules and their proxy have drifted and the proxy is the one to distrust.
+    """
+    fired = _fired_detection_rule(eval_df)
+    if fired is None:
+        return {}
+    fired = fired.astype(int)
+    missed_mask = (y_true == 1) & (fired == 0)
+
+    result = {
+        "precision": precision_score(y_true, fired, zero_division=0),
+        "recall": recall_score(y_true, fired, zero_division=0),
+        "missed": int(missed_mask.sum()),
+        "false_positives": int(((y_true == 0) & (fired == 1)).sum()),
+        "attacks": int((y_true == 1).sum()),
+    }
+
+    # Per-tactic recall. The aggregate hides which tactics the rule layer is
+    # blind to, and "6 of the privesc attempts were denied sudo, so no dangerous
+    # command ever ran and no rule could fire" is the report's sharpest example.
+    if "scenario" in eval_df.columns:
+        missed = collections.Counter(
+            eval_df.loc[missed_mask, "scenario"].fillna("(none)"))
+        totals = collections.Counter(
+            eval_df.loc[y_true == 1, "scenario"].fillna("(none)"))
+        result["missed_by_scenario"] = dict(missed.most_common())
+        result["recall_by_scenario"] = {
+            tactic: round((total - missed.get(tactic, 0)) / total, 4)
+            for tactic, total in sorted(totals.items())
+        }
+    return result
+
+
+def report_baselines(eval_df: pd.DataFrame, y_true: np.ndarray) -> dict:
+    """Print both baselines side by side and return them for the results table."""
+    flags = rule_baseline(eval_df, y_true)
+    rules = rule_id_baseline(eval_df, y_true)
+
+    print(f"\n\n{'#' * 62}\n# RULE LAYER -- the bar ML has to clear\n{'#' * 62}")
+    print(f"{'baseline':<28}{'precision':>10}{'recall':>9}{'missed':>8}")
+    if rules:
+        print(f"{'Wazuh rules (rule_id)':<28}{rules['precision']:>10.4f}"
+              f"{rules['recall']:>9.4f}{rules['missed']:>8}")
+    if flags:
+        print(f"{'keyword-flag proxy':<28}{flags['precision']:>10.4f}"
+              f"{flags['recall']:>9.4f}{flags['missed']:>8}")
+    if not rules:
+        print("  no fired_rule_ids column -- rebuild eval_real.jsonl with "
+              "ml/unsupervised/build_eval_set.py to measure the deployed rules")
+
+    if rules.get("recall_by_scenario"):
+        print("\n  rule-layer recall by tactic (attacks the rules never saw):")
+        print(f"  {'tactic':<16}{'recall':>8}{'missed':>8}")
+        missed = rules["missed_by_scenario"]
+        for tactic, recall in rules["recall_by_scenario"].items():
+            print(f"  {tactic:<16}{recall:>8.2f}{missed.get(tactic, 0):>8}")
+
+    out = {}
+    if rules:
+        out.update({f"rules_{k}": v for k, v in rules.items()
+                    if not isinstance(v, dict)})
+    if flags:
+        out.update({f"flagproxy_{k}": v for k, v in flags.items()})
+    return out
 
 
 def evaluate(model_name: str, eval_df: pd.DataFrame, y_true: np.ndarray,

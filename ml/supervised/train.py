@@ -51,7 +51,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))          # .../hps/ml/supervis
 ROOT = os.path.dirname(os.path.dirname(HERE))              # .../hps
 
 sys.path.insert(0, ROOT)
-from ml.evaluation import comparison_table, evaluate, report, rule_baseline  # noqa: E402
+from ml.evaluation import comparison_table, evaluate, report, report_baselines  # noqa: E402
 from ml.feature_gate import leaked, model_features  # noqa: E402
 from ml.persistence import save as save_bundle  # noqa: E402
 
@@ -145,12 +145,7 @@ def main() -> int:
     print(f"\n[fit] {len(X_train)} sessions, {len(features)} features, "
           f"{len(X_hold)} held out as control")
 
-    baseline = rule_baseline(eval_df, y_eval)
-    if baseline:
-        print(f"[baseline] rule layer (any flag = alert): "
-              f"precision {baseline['precision']:.4f}  "
-              f"recall {baseline['recall']:.4f}  "
-              f"-- blind to {baseline['missed']} attacks by construction")
+    report_baselines(eval_df, y_eval)
 
     profile = json.load(open(args.profile, encoding="utf-8"))
 
