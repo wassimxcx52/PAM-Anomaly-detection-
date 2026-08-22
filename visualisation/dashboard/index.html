@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAM Anomaly Scores</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  /* ── design tokens (dataviz palette) ─────────────────────────────────── */
+  :root {
+    color-scheme: light;
+    --surface-0:      #f4f4f2;   /* page ground   */
+    --surface-1:      #fcfcfb;   /* card / chart surface */
+    --surface-2:      #ececea;   /* subtle fills, table stripes */
+    --border:         #dcdcd7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #8a8983;
+    --seq-1:          #2a78d6;   /* normal sessions (sequential blue) */
+    --seq-1-soft:     #9ec5f4;
+    --status-critical:#d03b3b;   /* alerting sessions (status, reserved) */
+    --status-good:    #0ca30c;
+    --status-warning: #fab219;
+    --grid:           #e7e7e3;
+    --shadow:         0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.04);
+    --radius:         12px;
+    --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-0:      #121211;
+      --surface-1:      #1a1a19;
+      --surface-2:      #242423;
+      --border:         #34342f;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8f8e84;
+      --seq-1:          #3987e5;
+      --seq-1-soft:     #1c5cab;
+      --status-critical:#e06060;
+      --status-good:    #33b533;
+      --status-warning: #fab219;
+      --grid:           #2b2b28;
+      --shadow:         0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0:      #121211;
+    --surface-1:      #1a1a19;
+    --surface-2:      #242423;
+    --border:         #34342f;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #8f8e84;
+    --seq-1:          #3987e5;
+    --seq-1-soft:     #1c5cab;
+    --status-critical:#e06060;
+    --status-good:    #33b533;
+    --status-warning: #fab219;
+    --grid:           #2b2b28;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--font);
+    background: var(--surface-0); color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+
+  /* ── header ──────────────────────────────────────────────────────────── */
+  header.top { display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+  header.top h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+  header.top h1 .sub { color: var(--text-muted); font-weight: 500; }
+  .theme-btn {
+    background: var(--surface-1); border: 1px solid var(--border); color: var(--text-secondary);
+    border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  .theme-btn:hover { border-color: var(--text-muted); }
+  p.lede { color: var(--text-secondary); margin: 6px 0 20px; font-size: 14px; max-width: 70ch; }
+
+  /* ── control bar ─────────────────────────────────────────────────────── */
+  .controls {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; box-shadow: var(--shadow); margin-bottom: 20px;
+    display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); font-weight: 600; }
+  .field input {
+    background: var(--surface-0); border: 1px solid var(--border); color: var(--text-primary);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: var(--mono); min-width: 240px;
+  }
+  .field input:focus { outline: 2px solid var(--seq-1); outline-offset: -1px; border-color: var(--seq-1); }
+  button.act {
+    background: var(--seq-1); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  button.act:hover { filter: brightness(1.06); }
+  button.act.ghost { background: var(--surface-0); color: var(--text-secondary); border: 1px solid var(--border); }
+  button.act:disabled { opacity: .5; cursor: not-allowed; }
+  .conn { font-size: 12px; display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+  .dot.ok { background: var(--status-good); } .dot.err { background: var(--status-critical); }
+
+  /* ── stat tiles ──────────────────────────────────────────────────────── */
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  @media (max-width: 720px){ .tiles { grid-template-columns: repeat(2,1fr); } }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; box-shadow: var(--shadow); }
+  .tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); font-weight: 600; }
+  .tile .v { font-size: 28px; font-weight: 700; margin-top: 6px; letter-spacing: -.02em; line-height: 1; }
+  .tile .v small { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+  .tile.alerts .v { color: var(--status-critical); }
+
+  /* ── cards / charts ──────────────────────────────────────────────────── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 860px){ .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px; box-shadow: var(--shadow); margin-bottom: 18px; }
+  .card h2 { font-size: 14px; margin: 0 0 2px; letter-spacing: -.01em; }
+  .card .cap { font-size: 12px; color: var(--text-muted); margin: 0 0 14px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 0 0 10px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .chart-box { position: relative; }
+
+  /* ── table ───────────────────────────────────────────────────────────── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); font-weight: 600; }
+  tbody tr:hover { background: var(--surface-2); cursor: pointer; }
+  tbody tr.sel { background: var(--surface-2); outline: 1px solid var(--seq-1); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 999px; }
+  .badge.alert { background: color-mix(in srgb, var(--status-critical) 16%, transparent); color: var(--status-critical); }
+  .badge.ok { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--status-good); }
+
+  .msg { border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-bottom: 18px; display: none; }
+  .msg.show { display: block; }
+  .msg.error { background: color-mix(in srgb, var(--status-critical) 12%, transparent);
+    border: 1px solid var(--status-critical); color: var(--text-primary); }
+  .msg.info { background: color-mix(in srgb, var(--seq-1) 10%, transparent); border: 1px solid var(--seq-1); }
+  .muted { color: var(--text-muted); }
+  .mono { font-family: var(--mono); }
+  code.k { font-family: var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .hidden { display: none !important; }
+  .picker { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>PAM Anomaly Scores <span class="sub">— WALLIX privileged-session scoring</span></h1>
+    <button class="theme-btn" id="themeBtn" type="button">◐ Theme</button>
+  </header>
+  <p class="lede">
+    Posts sessions in <code class="k">sessions.jsonl</code> shape to the FastAPI
+    <code class="k">/score</code> endpoint and ranks them by anomaly score. Bars above the
+    model threshold are the sessions the SOC would triage first.
+  </p>
+
+  <!-- controls -->
+  <div class="controls">
+    <div class="field">
+      <label for="apiUrl">FastAPI base URL</label>
+      <input id="apiUrl" type="text" value="http://127.0.0.1:8000" spellcheck="false">
+    </div>
+    <button class="act" id="scoreBtn" type="button">Score sessions</button>
+    <button class="act ghost" id="sampleBtn" type="button">Load sample payload</button>
+    <span class="conn"><span class="dot" id="connDot"></span><span id="connTxt">not connected</span></span>
+  </div>
+
+  <div class="msg" id="msg"></div>
+
+  <!-- model info stat tiles -->
+  <div class="tiles">
+    <div class="tile"><div class="k">Model loaded</div><div class="v" id="tModel">—</div></div>
+    <div class="tile"><div class="k">Sessions scored</div><div class="v" id="tScored">—</div></div>
+    <div class="tile alerts"><div class="k">Alerts (&gt; threshold)</div><div class="v" id="tAlerts">—</div></div>
+    <div class="tile"><div class="k">Threshold</div><div class="v" id="tThresh">—</div></div>
+  </div>
+
+  <!-- hero: ranked scores -->
+  <div class="card">
+    <h2>Ranked anomaly scores</h2>
+    <p class="cap">Every scored session, highest anomaly first. The dashed line is the model's alert
+      threshold; bars crossing it are flagged. Click a bar to inspect its features below.</p>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--status-critical)"></i>Alert (above threshold)</span>
+      <span><i class="swatch" style="background:var(--seq-1)"></i>Below threshold</span>
+      <span><i class="swatch" style="background:var(--text-muted);width:16px;height:0;border-top:2px dashed var(--text-muted);border-radius:0"></i>Threshold</span>
+    </div>
+    <div class="chart-box"><canvas id="rankChart" height="360"></canvas></div>
+  </div>
+
+  <div class="grid2">
+    <!-- distribution -->
+    <div class="card">
+      <h2>Score distribution</h2>
+      <p class="cap">How the batch's scores spread out. The separation between the benign cluster and
+        the tail on the right is what a good detector produces.</p>
+      <div class="chart-box"><canvas id="histChart" height="260"></canvas></div>
+    </div>
+
+    <!-- feature profile -->
+    <div class="card">
+      <h2>Feature profile</h2>
+      <p class="picker" id="featPicker">Select a session from the ranked chart or the table.</p>
+      <div class="chart-box"><canvas id="featChart" height="260"></canvas></div>
+    </div>
+  </div>
+
+  <!-- table view (accessibility / audit) -->
+  <div class="card">
+    <h2>All sessions <span class="muted" style="font-weight:500;font-size:12px">(table view)</span></h2>
+    <p class="cap">The same ranking as the chart, for screen readers, audit, and copy-paste.</p>
+    <div class="table-wrap">
+      <table id="resTable">
+        <thead><tr>
+          <th>#</th><th>Session</th><th class="num">Score</th>
+          <th>Status</th><th class="num">Cmds</th><th class="num">Cmd&nbsp;entropy</th><th class="num">Max&nbsp;surprisal</th>
+        </tr></thead>
+        <tbody id="resBody"><tr><td colspan="7" class="muted">No results yet — score a batch.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="muted" style="font-size:12px">
+    Model metadata: <span id="modelMeta" class="mono">—</span>
+  </p>
+</div>
+
+<script type="module">
+// ── palette read from CSS so charts follow the live theme ──────────────────
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = () => ({
+  critical: css('--status-critical'),
+  seq:      css('--seq-1'),
+  seqSoft:  css('--seq-1-soft'),
+  grid:     css('--grid'),
+  text:     css('--text-secondary'),
+  muted:    css('--text-muted'),
+  surface:  css('--surface-1'),
+});
+
+// ── threshold reference-line plugin (avoids a second CDN dependency) ───────
+const thresholdLine = {
+  id: 'thresholdLine',
+  afterDatasetsDraw(chart, _args, opts) {
+    const t = opts.value;
+    if (t == null || !chart.scales.x) return;
+    const x = chart.scales.x.getPixelForValue(t);
+    const { top, bottom } = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = C().muted; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C().muted; ctx.font = '11px ' + css('--font'); ctx.textAlign = 'center';
+    ctx.fillText('threshold', x, top - 4);
+    ctx.restore();
+  }
+};
+Chart.register(thresholdLine);
+
+Chart.defaults.font.family = css('--font');
+Chart.defaults.color = css('--text-secondary');
+
+// ── state ──────────────────────────────────────────────────────────────────
+let rankChart, histChart, featChart;
+let lastResults = [];          // scored sessions from /score
+let lastThreshold = null;
+let selectedId = null;
+
+const $ = id => document.getElementById(id);
+const msg = (text, kind='info') => {
+  const m = $('msg'); m.className = `msg show ${kind}`; m.innerHTML = text;
+};
+const clearMsg = () => { $('msg').className = 'msg'; };
+
+// ── model info (GET /model) ─────────────────────────────────────────────────
+async function loadModel(base) {
+  try {
+    const r = await fetch(`${base}/model`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const m = await r.json();
+    $('connDot').className = 'dot ok'; $('connTxt').textContent = 'connected';
+    $('tModel').textContent = m.model_name || '—';
+    $('tThresh').textContent = m.threshold != null ? (+m.threshold).toFixed(3) : 'none';
+    const met = m.metrics_at_build || {};
+    const p = k => (met[k] != null ? (+met[k]).toFixed(3) : '—');
+    $('modelMeta').textContent =
+      `${m.model_name} (${m.track}) · features=${(m.features||[]).length} · `
+      + `vocab=${m.profile_vocabulary} · fp=${m.profile_fingerprint} · `
+      + `build p@25=${p('headline_p@25')} recall=${p('headline_recall')}`;
+    return m;
+  } catch (e) {
+    $('connDot').className = 'dot err'; $('connTxt').textContent = 'no /model';
+    throw e;
+  }
+}
+
+// ── score (POST /score) ─────────────────────────────────────────────────────
+async function scoreBatch() {
+  const base = $('apiUrl').value.replace(/\/+$/, '');
+  clearMsg();
+  $('scoreBtn').disabled = true; $('scoreBtn').textContent = 'Scoring…';
+  try {
+    let payload;
+    try {
+      const s = await fetch('./sample_sessions.json');
+      payload = await s.json();
+    } catch {
+      throw new Error('Could not read sample_sessions.json (serve this folder over HTTP, not file://).');
+    }
+    await loadModel(base).catch(()=>{}); // best-effort; /score still authoritative
+
+    const r = await fetch(`${base}/score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      throw new Error(`POST /score → HTTP ${r.status}. ${body.slice(0,300)}`);
+    }
+    const data = await r.json();
+    $('connDot').className = 'dot ok'; $('connTxt').textContent = 'connected';
+    render(data);
+    msg(`Scored <b>${data.scored}</b> sessions with <b>${data.model_name}</b>. `
+      + `Threshold ${data.threshold != null ? (+data.threshold).toFixed(3) : 'none'}.`, 'info');
+  } catch (e) {
+    msg(`<b>Could not score.</b> ${e.message}<br>`
+      + `Start the API first: <code class="k">cd api &amp;&amp; uvicorn main:app --port 8000</code>, `
+      + `then serve this folder: <code class="k">python -m http.server 5500</code> and open `
+      + `<code class="k">http://127.0.0.1:5500/visualisation/dashboard/</code>.`, 'error');
+    $('connDot').className = 'dot err'; $('connTxt').textContent = 'error';
+  } finally {
+    $('scoreBtn').disabled = false; $('scoreBtn').textContent = 'Score sessions';
+  }
+}
+
+// ── render everything from a /score response ────────────────────────────────
+function render(data) {
+  lastResults = data.results.slice().sort((a,b)=>a.rank-b.rank);
+  lastThreshold = data.threshold;
+  selectedId = null;
+
+  const alerts = lastResults.filter(r => r.alert).length;
+  $('tScored').textContent = data.scored;
+  $('tAlerts').innerHTML = `${alerts} <small>/ ${data.scored}</small>`;
+  $('tModel').textContent = data.model_name;
+  if (data.threshold != null) $('tThresh').textContent = (+data.threshold).toFixed(3);
+
+  drawRank();
+  drawHist();
+  drawTable();
+  // auto-select the top-ranked session's feature profile
+  if (lastResults.length) selectSession(lastResults[0].session_id);
+}
+
+const shortId = id => id.length > 22 ? id.slice(0, 20) + '…' : id;
+
+function drawRank() {
+  const rows = lastResults;
+  const labels = rows.map(r => shortId(r.session_id));
+  const values = rows.map(r => r.score);
+  const colors = rows.map(r => r.alert ? C().critical : C().seq);
+  const ctx = $('rankChart');
+  rankChart?.destroy();
+  rankChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{
+      data: values, backgroundColor: colors, borderRadius: 4, borderSkipped: false,
+      barThickness: rows.length > 24 ? 8 : 16,
+    }]},
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      onClick: (_e, els) => { if (els.length) selectSession(rows[els[0].index].session_id); },
+      plugins: {
+        legend: { display: false },
+        thresholdLine: { value: lastThreshold },
+        tooltip: { callbacks: {
+          title: items => rows[items[0].dataIndex].session_id,
+          label: it => {
+            const r = rows[it.dataIndex];
+            return [`score ${r.score.toFixed(4)}`, `rank #${r.rank}`, r.alert ? 'ALERT' : 'below threshold'];
+          }
+        }},
+      },
+      scales: {
+        x: { beginAtZero: true, grid: { color: C().grid }, title: { display: true, text: 'anomaly score', color: C().muted } },
+        y: { grid: { display: false }, ticks: { font: { family: css('--mono'), size: 11 } } },
+      },
+    }
+  });
+}
+
+function drawHist() {
+  const scores = lastResults.map(r => r.score);
+  if (!scores.length) return;
+  const lo = Math.min(...scores), hi = Math.max(...scores);
+  const nb = 12, span = (hi - lo) || 1, w = span / nb;
+  const bins = Array.from({length: nb}, () => 0);
+  scores.forEach(s => { let i = Math.floor((s - lo) / w); if (i >= nb) i = nb-1; if (i < 0) i = 0; bins[i]++; });
+  const labels = bins.map((_, i) => (lo + i*w).toFixed(2));
+  const ctx = $('histChart');
+  histChart?.destroy();
+  histChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data: bins, backgroundColor: C().seq, borderRadius: 3, barPercentage: .98, categoryPercentage: .98 }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        thresholdLine: { value: lastThreshold != null ? (lastThreshold) : null },
+        tooltip: { callbacks: { title: it => `score ≈ ${labels[it[0].dataIndex]}`, label: it => `${it.raw} sessions` } },
+      },
+      scales: {
+        x: { grid: { display: false }, title: { display: true, text: 'anomaly score', color: C().muted }, ticks: { maxRotation: 0, autoSkip: true } },
+        y: { beginAtZero: true, grid: { color: C().grid }, ticks: { precision: 0 }, title: { display: true, text: 'sessions', color: C().muted } },
+      },
+    }
+  });
+}
+
+function selectSession(id) {
+  selectedId = id;
+  drawFeature();
+  document.querySelectorAll('#resBody tr').forEach(tr =>
+    tr.classList.toggle('sel', tr.dataset.id === id));
+}
+
+function drawFeature() {
+  const row = lastResults.find(r => r.session_id === selectedId);
+  if (!row) return;
+  const feats = row.features || {};
+  const entries = Object.entries(feats)
+    .filter(([, v]) => v != null && isFinite(v))
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 10);
+  $('featPicker').innerHTML =
+    `<b class="mono">${row.session_id}</b> — score ${row.score.toFixed(4)}, rank #${row.rank}` +
+    (row.alert ? ' · <span style="color:var(--status-critical);font-weight:600">ALERT</span>' : '');
+  const labels = entries.map(([k]) => k);
+  const values = entries.map(([, v]) => v);
+  const colors = values.map(() => row.alert ? C().critical : C().seq);
+  const ctx = $('featChart');
+  featChart?.destroy();
+  featChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, barThickness: 14 }]},
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: it => `${it.label}: ${(+it.raw).toFixed(4)}` } } },
+      scales: {
+        x: { grid: { color: C().grid }, title: { display: true, text: 'feature value', color: C().muted } },
+        y: { grid: { display: false }, ticks: { font: { family: css('--mono'), size: 11 } } },
+      },
+    }
+  });
+}
+
+function drawTable() {
+  const tb = $('resBody');
+  tb.innerHTML = '';
+  const numFmt = v => (v == null ? '—' : (+v).toFixed(v >= 1 ? 0 : 3));
+  for (const r of lastResults) {
+    const f = r.features || {};
+    const cmdCount = f['command_count'] ?? f['commands_count'] ?? null;
+    const ent = f['command_entropy'] ?? null;
+    const surp = f['cmd_max_surprisal'] ?? null;
+    const tr = document.createElement('tr');
+    tr.dataset.id = r.session_id;
+    tr.innerHTML =
+      `<td class="num">${r.rank}</td>` +
+      `<td class="mono">${r.session_id}</td>` +
+      `<td class="num">${r.score.toFixed(4)}</td>` +
+      `<td>${r.alert ? '<span class="badge alert">● alert</span>' : '<span class="badge ok">● ok</span>'}</td>` +
+      `<td class="num">${numFmt(cmdCount)}</td>` +
+      `<td class="num">${ent == null ? '—' : (+ent).toFixed(3)}</td>` +
+      `<td class="num">${surp == null ? '—' : (+surp).toFixed(3)}</td>`;
+    tr.addEventListener('click', () => selectSession(r.session_id));
+    tb.appendChild(tr);
+  }
+}
+
+// ── theme toggle ────────────────────────────────────────────────────────────
+const order = ['auto','light','dark'];
+$('themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme') || 'auto';
+  const next = order[(order.indexOf(cur) + 1) % order.length];
+  document.documentElement.setAttribute('data-theme', next);
+  $('themeBtn').textContent = `◐ ${next[0].toUpperCase()+next.slice(1)}`;
+  Chart.defaults.color = css('--text-secondary');
+  if (lastResults.length) { drawRank(); drawHist(); drawFeature(); }
+});
+
+// ── wiring ──────────────────────────────────────────────────────────────────
+$('scoreBtn').addEventListener('click', scoreBatch);
+$('sampleBtn').addEventListener('click', async () => {
+  try {
+    const s = await (await fetch('./sample_sessions.json')).json();
+    msg(`Sample payload has <b>${s.sessions.length}</b> sessions ready to POST to `
+      + `<code class="k">/score</code>. Click <b>Score sessions</b>.`, 'info');
+  } catch {
+    msg('Could not read sample_sessions.json — serve this folder over HTTP.', 'error');
+  }
+});
+// try model info on load so the connection dot is meaningful before scoring
+loadModel($('apiUrl').value.replace(/\/+$/, '')).catch(()=>{});
+</script>
+</body>
+</html>

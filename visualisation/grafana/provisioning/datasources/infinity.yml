@@ -1,0 +1,30 @@
+# Infinity datasource, pre-wired to the PAM scoring API.
+#
+# The base URL is the ONLY thing that changes per deployment. Every panel in the
+# dashboard uses RELATIVE paths (/grafana/summary, /grafana/ranked, ...), so they
+# all resolve against this base -- change it in one place, not in nine panels.
+#
+#   - both containers on the wazuh network:   http://pam-scoring:8000
+#   - Grafana in Docker, API on the host:     http://host.docker.internal:8000
+#   - everything native on one host:          http://127.0.0.1:8000
+#
+# Override without editing this file:  PAM_API_URL=http://... docker compose up
+apiVersion: 1
+
+datasources:
+  - name: Infinity (PAM scoring API)
+    uid: infinity-pam
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    isDefault: false
+    editable: true
+    jsonData:
+      # Infinity reads relative query URLs against this base.
+      global_queries: []
+      # allowedHosts keeps the datasource from being pointed at arbitrary URLs.
+      allowedHosts:
+        - ${PAM_API_URL:-http://pam-scoring:8000}
+      # The base for relative URLs used by the dashboard panels.
+      baseUrl: ${PAM_API_URL:-http://pam-scoring:8000}
+      # Auth: none (the API is unauthenticated inside the compose network). If you
+      # front the API with a token later, set it here as a secure header.

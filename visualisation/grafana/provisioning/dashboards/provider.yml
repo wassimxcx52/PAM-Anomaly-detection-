@@ -1,0 +1,15 @@
+# Auto-load every dashboard JSON in this folder at Grafana startup.
+apiVersion: 1
+
+providers:
+  - name: PAM dashboards
+    orgId: 1
+    folder: PAM
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

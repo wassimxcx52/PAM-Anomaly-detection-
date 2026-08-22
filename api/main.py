@@ -45,6 +45,7 @@ from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -52,6 +53,8 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "feature_extraction"))
 
 from ml.persistence import load as load_bundle  # noqa: E402
+from api import store  # noqa: E402
+from api import grafana_api  # noqa: E402
 
 BUNDLE_PATH = os.environ.get(
     "BUNDLE_PATH", os.path.join(ROOT, "ml", "bundles", "isolationforest.joblib"))
@@ -60,7 +63,30 @@ app = FastAPI(title="PAM anomaly scoring",
               description="WALLIX privileged-session anomaly scoring",
               version="1.0.0")
 
+# The dashboard (visualisation/dashboard/) is a static page opened from the file
+# system or a throwaway `python -m http.server`, so its browser Origin never
+# matches this service's host. Without CORS the browser blocks the /score fetch
+# before it leaves the tab. This is a lab convenience only -- it does NOT make
+# the service safe to expose: /score is still unauthenticated (see the module
+# docstring), and a permissive CORS policy on a public port would let any page
+# read privileged session scores. Keep it bound inside the compose network.
+# Override the allow-list with DASHBOARD_ORIGINS (comma-separated) if serving the
+# page from a fixed origin; "*" is the default only because a file:// page sends
+# Origin: null, which no explicit list can match.
+_origins_env = os.environ.get("DASHBOARD_ORIGINS", "*")
+_allow_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allow_origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
 _state: dict[str, Any] = {}
+
+# Grafana read/ingest surface (/grafana/*). Reads hit the SQLite store only;
+# only /grafana/ingest touches the model. See api/grafana_api.py.
+app.include_router(grafana_api.router)
 
 
 class Session(BaseModel):
@@ -113,9 +139,20 @@ def _load() -> None:
     _state["bundle"] = bundle
     # The scorer rebuilds its TF-IDF from the profile's command list, which
     # takes a moment; doing it once at startup keeps it off the request path.
-    _state["scorer"] = command_profile.Scorer(bundle["command_profile"])
+    scorer = command_profile.Scorer(bundle["command_profile"])
+    _state["scorer"] = scorer
     print(f"[startup] loaded {bundle['model_name']} ({bundle['track']}) "
           f"from {BUNDLE_PATH}, profile {bundle['profile_fingerprint']}")
+
+    # Wire the Grafana router: give it the shared scoring function (so ingest
+    # runs the exact same model path) and the profile's per-command surprisal
+    # (for the audit log), then initialise the scored-session store.
+    grafana_api.configure(
+        score_fn=score_sessions,
+        surprisal_fn=scorer.surprisal,
+        db_path=store.DEFAULT_PATH,
+    )
+    print(f"[startup] grafana store at {store.DEFAULT_PATH}")
 
 
 @app.get("/health")
@@ -145,17 +182,25 @@ def model_info() -> dict:
     }
 
 
-@app.post("/score", response_model=ScoreResponse)
-def score(request: ScoreRequest) -> ScoreResponse:
+def score_sessions(sessions: list[dict]) -> tuple[list[dict], str, float | None]:
+    """The one place inference happens. Batch of session dicts -> ranked results.
+
+    Shared by POST /score and the Grafana ingest path so both compute features
+    and run the model identically -- there is no second scoring code path to
+    drift. Returns (results, model_name, threshold) with results already ranked
+    by score descending; each result is a plain dict:
+        {session_id, score, alert, rank, features}
+    Raises HTTPException(422) for sessions that carry no scorable telemetry.
+    """
     bundle, scorer = _state.get("bundle"), _state.get("scorer")
     if bundle is None:
         raise HTTPException(503, "no bundle loaded")
-    if not request.sessions:
+    if not sessions:
         raise HTTPException(400, "no sessions supplied")
 
     from transform import add_rarity_features, build_features_from_sessions
 
-    frame = pd.DataFrame([s.model_dump() for s in request.sessions])
+    frame = pd.DataFrame(sessions)
     features = build_features_from_sessions(frame)
     features = add_rarity_features(features, scorer)
 
@@ -189,20 +234,27 @@ def score(request: ScoreRequest) -> ScoreResponse:
     ranked = features.sort_values("score", ascending=False).reset_index(drop=True)
 
     results = [
-        ScoredSession(
-            session_id=row["session_id"],
-            score=float(row["score"]),
-            alert=bool(threshold is not None and row["score"] > threshold),
-            rank=position + 1,
-            features={c: (None if pd.isna(row[c]) else float(row[c])) for c in wanted},
-        )
+        {
+            "session_id": row["session_id"],
+            "score": float(row["score"]),
+            "alert": bool(threshold is not None and row["score"] > threshold),
+            "rank": position + 1,
+            "features": {c: (None if pd.isna(row[c]) else float(row[c])) for c in wanted},
+        }
         for position, row in ranked.iterrows()
     ]
+    return results, bundle["model_name"], threshold
 
+
+@app.post("/score", response_model=ScoreResponse)
+def score(request: ScoreRequest) -> ScoreResponse:
+    results, model_name, threshold = score_sessions(
+        [s.model_dump() for s in request.sessions])
+    bundle = _state["bundle"]
     return ScoreResponse(
-        model_name=bundle["model_name"],
+        model_name=model_name,
         threshold=threshold,
         profile_fingerprint=bundle["profile_fingerprint"],
         scored=len(results),
-        results=results,
+        results=[ScoredSession(**r) for r in results],
     )

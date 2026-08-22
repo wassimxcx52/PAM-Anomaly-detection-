@@ -1,0 +1,90 @@
+# Scenario A -- app-only Linux VM (scoring API + collector + Grafana) that
+# connects to an EXISTING Wazuh indexer. Wazuh and WALLIX stay where they are.
+#
+#   cd deploy
+#   cp .env.example .env        # fill in indexer URL/creds + Grafana password
+#   docker compose up -d --build
+#   # open http://<vm-ip>:3000
+#
+# Build context is the repo ROOT (..), because api/Dockerfile copies
+# feature_extraction/ and ml/ (the bundle + feature code travel with the image).
+#
+# WHAT'S EXPOSED: only Grafana (:3000). pam-scoring is unauthenticated and
+# returns privileged session content -- it is reachable ONLY on the internal
+# pam-net, never published.
+
+name: pam
+
+services:
+  # ── scoring service: warm model, /score + /grafana/* read API ─────────────
+  pam-scoring:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    image: pam-scoring:1.0
+    container_name: pam-scoring
+    restart: unless-stopped
+    environment:
+      BUNDLE_PATH: /app/ml/bundles/isolationforest.joblib
+      SCORES_DB_PATH: /data/scores.db
+    volumes:
+      - pam_scores:/data
+    networks: [pam-net]
+    # No ports: internal only. Health check is defined in api/Dockerfile.
+
+  # ── collector: extract.py (indexer -> sessions.jsonl) + ingest loop ───────
+  pam-collector:
+    image: pam-scoring:1.0            # same image, different job
+    container_name: pam-collector
+    restart: unless-stopped
+    depends_on:
+      pam-scoring:
+        condition: service_healthy
+    entrypoint: ["sh", "/entrypoint/collector-entrypoint.sh"]
+    environment:
+      PAM_API_URL: http://pam-scoring:8000
+      PAM_INTERVAL: "${PAM_INTERVAL:-30}"
+      EXTRACT_SINCE: "${EXTRACT_SINCE:-1h}"
+      # Wazuh indexer -- read by feature_extraction/extract.py
+      WAZUH_INDEXER_URL: "${WAZUH_INDEXER_URL}"
+      WAZUH_INDEXER_USER: "${WAZUH_INDEXER_USER}"
+      WAZUH_INDEXER_PASS: "${WAZUH_INDEXER_PASS}"
+      WAZUH_VERIFY_TLS: "${WAZUH_VERIFY_TLS:-false}"
+    volumes:
+      - ./collector-entrypoint.sh:/entrypoint/collector-entrypoint.sh:ro
+      - pipeline_out:/app/feature_extraction/out
+    networks: [pam-net]
+
+  # ── Grafana: Infinity plugin + auto-provisioned datasource & dashboard ────
+  pam-grafana:
+    image: grafana/grafana:11.2.0
+    container_name: pam-grafana
+    restart: unless-stopped
+    depends_on:
+      pam-scoring:
+        condition: service_healthy
+    environment:
+      GF_INSTALL_PLUGINS: "yesoreyeram-infinity-datasource"
+      GF_SECURITY_ADMIN_USER: "${GF_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_ADMIN_PASSWORD:-admin}"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Consumed by the provisioned datasource (baseUrl) -- points at the API
+      # by its service name on pam-net.
+      PAM_API_URL: "http://pam-scoring:8000"
+    ports:
+      - "${GF_PORT:-3000}:3000"
+    volumes:
+      - ../visualisation/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../visualisation/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - pam_grafana:/var/lib/grafana
+    networks: [pam-net]
+
+volumes:
+  pam_scores:       # scored-session SQLite store (history survives redeploys)
+  pam_grafana:      # Grafana users + any dashboard edits
+  pipeline_out:     # sessions.jsonl the collector produces
+
+networks:
+  pam-net:
+    driver: bridge

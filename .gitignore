@@ -11,7 +11,10 @@ dataset_generation/commands_dataset/linuxcommands_raw.json
 
 # local-only project context (contains lab credentials)
 claude.md
-ml/bundles/
+
+# ml/bundles/ ARE tracked: the trained model bundles (<1 MB total) ship with the
+# repo so `git clone` on a deploy VM gets a working model -- api/Dockerfile bakes
+# them into the image at build. Do NOT re-ignore them.
 
 # Derivative feature matrices. Regenerable offline by transform.py from the
 # session JSONL files, which ARE tracked -- the real telemetry
@@ -30,3 +33,8 @@ feature_extraction/out/features_eval_real_rf.csv
 
 # Empty live-extraction target
 feature_extraction/out/live/
+
+# Grafana scored-session store (runtime, rebuilt by the collector)
+api/scores.db
+api/scores.db-wal
+api/scores.db-shm
