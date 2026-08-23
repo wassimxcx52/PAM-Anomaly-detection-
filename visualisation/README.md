@@ -1,5 +1,23 @@
 # visualisation/
 
+Trois façons de visualiser les résultats :
+
+| Dossier / fichier | Quoi | Pour qui |
+|---|---|---|
+| `fig*.png` / `fig*.pdf` | **Figures d'impression** de la piste non supervisée (voir ci-dessous) | rapport / diapositives |
+| `grafana/` | **Tableau de bord temps réel Grafana** — scores d'anomalie PAM, alertes, audit des commandes, filtrage 24 h. Alimenté par l'API FastAPI (`/grafana/*`). | SOC / démo live |
+| `dashboard/` | **Tableau de bord autonome Chart.js** — mêmes vues, page HTML unique, sans Grafana. Tape sur `/score`. | démo rapide sans stack |
+
+- **Grafana** : datasource Infinity + dashboard auto-provisionnés. Détails et mise
+  en route dans [`grafana/README.md`](grafana/README.md). Lancé par la stack
+  `deploy/` (`docker compose -f deploy/docker-compose.yml up -d`), Grafana sur `:3000`.
+- **Chart.js** : servir le dossier en HTTP puis ouvrir `dashboard/index.html` ;
+  voir [`dashboard/README.md`](dashboard/README.md).
+
+---
+
+## Figures d'impression
+
 Figures de la piste non supervisée. Régénérer avec :
 
 ```powershell
