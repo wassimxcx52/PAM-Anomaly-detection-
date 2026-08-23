@@ -78,9 +78,17 @@ def read_new_sessions(path: str, seen: set[str]) -> list[dict]:
     return out
 
 
+# Scoring cost is per-session (feature extraction + TF-IDF novelty + model), so
+# a big chunk can exceed the HTTP timeout on a slow host and never complete --
+# the collector then retries the same oversized chunk forever. Keep chunks small
+# and the timeout generous; both are tunable via env for slow/fast environments.
+CHUNK_SIZE = int(os.environ.get("PAM_INGEST_CHUNK", "25"))
+INGEST_TIMEOUT = int(os.environ.get("PAM_INGEST_TIMEOUT", "300"))
+
+
 def ingest(api: str, sessions: list[dict]) -> dict:
     resp = requests.post(f"{api.rstrip('/')}/grafana/ingest",
-                         json={"sessions": sessions}, timeout=60)
+                         json={"sessions": sessions}, timeout=INGEST_TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
@@ -89,10 +97,11 @@ def run_once(api: str, path: str, seen: set[str]) -> int:
     new = read_new_sessions(path, seen)
     if not new:
         return 0
-    # Ingest in chunks so a single huge backlog doesn't make one giant request.
+    # Ingest in small chunks; mark each chunk seen as soon as it succeeds so a
+    # later failure never re-sends what already landed (progress is monotonic).
     sent = 0
-    for i in range(0, len(new), 200):
-        chunk = new[i:i + 200]
+    for i in range(0, len(new), CHUNK_SIZE):
+        chunk = new[i:i + CHUNK_SIZE]
         result = ingest(api, chunk)
         for s in chunk:
             seen.add(s["session_id"])

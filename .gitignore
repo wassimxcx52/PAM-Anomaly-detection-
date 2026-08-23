@@ -38,3 +38,15 @@ feature_extraction/out/live/
 api/scores.db
 api/scores.db-wal
 api/scores.db-shm
+
+# --- ship-repo exclusions: regenerable / superseded / notes ---
+dataset_generation/commands_dataset/atomic_raw/
+feature_extraction/extract_raw.py
+feature_extraction/out/*.pre_repair.jsonl
+feature_extraction/out/features_*.csv
+feature_extraction/out/*_kmeans.json
+feature_extraction/out/kmeans_anomalies.json
+api/docker-compose.yml
+visualisation/grafana/docker-compose.grafana.yml
+visualisation/grafana/pam_dashboard.localhost.json
+pam_anomaly_detection_conversation.md

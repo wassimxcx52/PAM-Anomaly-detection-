@@ -22,9 +22,14 @@ datasources:
       # Infinity reads relative query URLs against this base.
       global_queries: []
       # allowedHosts keeps the datasource from being pointed at arbitrary URLs.
+      # HARDCODED to the compose service name -- Grafana provisioning does NOT
+      # support bash-style ${VAR:-default} expansion, so a value like that is
+      # stored literally and Infinity rejects it ("invalid url found in allowed
+      # hosts settings"), blocking every query. The service name is fixed on
+      # pam-net, so hardcoding is correct here.
       allowedHosts:
-        - ${PAM_API_URL:-http://pam-scoring:8000}
+        - http://pam-scoring:8000
       # The base for relative URLs used by the dashboard panels.
-      baseUrl: ${PAM_API_URL:-http://pam-scoring:8000}
+      baseUrl: http://pam-scoring:8000
       # Auth: none (the API is unauthenticated inside the compose network). If you
       # front the API with a token later, set it here as a secure header.

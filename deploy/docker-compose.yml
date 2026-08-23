@@ -41,6 +41,16 @@ services:
       pam-scoring:
         condition: service_healthy
     entrypoint: ["sh", "/entrypoint/collector-entrypoint.sh"]
+    # Makes host.docker.internal resolve on Linux Docker Engine (Docker Desktop
+    # provides it automatically). Lets WAZUH_INDEXER_URL=host.docker.internal
+    # reach the Wazuh stack's published 9200 without hardcoding a host IP.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # The image HEALTHCHECK curls :8000/health, but this container runs the
+    # collector, not the web server -- disable it so the collector isn't marked
+    # falsely unhealthy.
+    healthcheck:
+      disable: true
     environment:
       PAM_API_URL: http://pam-scoring:8000
       PAM_INTERVAL: "${PAM_INTERVAL:-30}"
@@ -57,7 +67,9 @@ services:
 
   # ── Grafana: Infinity plugin + auto-provisioned datasource & dashboard ────
   pam-grafana:
-    image: grafana/grafana:11.2.0
+    # 12.x (not 11.2) -- Infinity v4 needs a Grafana that exposes react/jsx-runtime
+    # as a shared module; 11.2 is too old and the plugin 404s on module.js.
+    image: grafana/grafana:12.0.0
     container_name: pam-grafana
     restart: unless-stopped
     depends_on:

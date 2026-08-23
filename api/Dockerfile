@@ -31,12 +31,18 @@ COPY feature_extraction/ ./feature_extraction/
 COPY ml/ ./ml/
 COPY api/ ./api/
 
-# ml/bundles is gitignored but must exist in the image. Build after training.
+# The model bundles ship with the repo (ml/bundles/ is tracked) and are copied
+# in above. SCORES_DB_PATH defaults here to /data, a dir owned by the runtime
+# user so the pam_scores named volume (mounted there) is writable -- a fresh
+# named volume inherits the mountpoint's ownership from the image.
 ENV BUNDLE_PATH=/app/ml/bundles/isolationforest.joblib \
+    SCORES_DB_PATH=/data/scores.db \
     PYTHONPATH=/app:/app/feature_extraction \
     PYTHONUNBUFFERED=1
 
-RUN useradd --create-home --uid 10001 scoring && chown -R scoring /app
+RUN useradd --create-home --uid 10001 scoring \
+    && mkdir -p /data \
+    && chown -R scoring /app /data
 USER scoring
 
 EXPOSE 8000

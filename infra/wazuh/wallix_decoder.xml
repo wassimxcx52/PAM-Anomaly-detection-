@@ -58,8 +58,18 @@
   Identity fields (session_id, IPs, user, device, account) cannot contain quotes,
   so they keep the cheaper [^"]*.
 -->
+<!--
+  Each child carries a distinct <prematch>. Without it, this KBD child (first in
+  the list) is tried on EVERY [SSH Session] line and, on a non-KBD line like
+  SESSION_DISCONNECTION, its long field chain partial-matches enough to block
+  Wazuh from falling through to the correct sibling -- so session lifecycle
+  events came out undecoded (data={}, rule 100503 never fired). The prematch
+  makes Wazuh skip a child whose key token is absent, so each line reaches the
+  right decoder. (Diagnosed 2026-08-23 via wazuh-logtest.)
+-->
 <decoder name="wallix-kbd">
   <parent>wallix</parent>
+  <prematch type="pcre2">type="KBD_INPUT"</prematch>
   <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="(KBD_INPUT)"\s+data="((?:[^"\\]|\\.)*)"</regex>
   <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,command</order>
 </decoder>
@@ -71,18 +81,25 @@
 -->
 <decoder name="wallix-cmdline">
   <parent>wallix</parent>
+  <prematch type="pcre2">command_line="</prematch>
   <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)".*?command_line="((?:[^"\\]|\\.)*)"</regex>
   <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,command</order>
 </decoder>
 
 <!-- ============ CHILD 3: session lifecycle with duration ============ -->
 <!--
-  SESSION_DISCONNECTION carries duration="H:MM:SS".
+  SESSION_DISCONNECTION carries duration="H:MM:SS". Kept short (session_id ->
+  type -> duration) with a duration=" prematch; the full 7-field chain matched in
+  a standalone regex test but not in Wazuh here. The close event only needs
+  session_id + wallix_event + duration -- srcip/dstip/user come from the
+  session's KBD/established events. This is what lets extract.py mark a session
+  closed (real session_end) instead of estimating it.
 -->
 <decoder name="wallix-session-duration">
   <parent>wallix</parent>
-  <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)".*?duration="([^"]*)"</regex>
-  <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event,duration</order>
+  <prematch type="pcre2">duration="</prematch>
+  <regex type="pcre2">session_id="([^"]*)".*?type="([^"]*)".*?duration="([^"]*)"</regex>
+  <order>session_id,wallix_event,duration</order>
 </decoder>
 
 <!-- ============ CHILD 4: full session event, no trailing payload ============ -->
@@ -91,6 +108,7 @@
 -->
 <decoder name="wallix-session">
   <parent>wallix</parent>
+  <prematch type="pcre2">session_id="[^"]*".*?type="SESSION_</prematch>
   <regex type="pcre2">session_id="([^"]*)".*?client_ip="([^"]*)".*?target_ip="([^"]*)".*?\buser="([^"]*)".*?device="([^"]*)".*?service="([^"]*)".*?account="([^"]*)".*?type="([^"]*)"</regex>
   <order>session_id,srcip,dstip,srcuser,dsthost,protocol,dstuser,wallix_event</order>
 </decoder>

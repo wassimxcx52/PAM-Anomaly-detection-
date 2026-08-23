@@ -55,7 +55,11 @@ LOGIN_PASS     = os.environ.get("WALLIX_LOGIN_PASS", "P@ssw@rd123.")
 TARGET_PASS    = os.environ.get("WALLIX_TARGET_PASS", "lab")
 TARGET_HOST    = "debian-lab"
 
-PROMPT_RE   = re.compile(r"[#$>][ ]?$")
+# Prompt matcher tolerates trailing whitespace after the prompt glyph; ANSI
+# colour/escape codes are stripped from the buffer before matching (see
+# _read_until_any / ANSI_RE), so a coloured PS1 no longer defeats it -- that
+# brittleness was a common cause of spurious 15s timeouts on a finished command.
+PROMPT_RE   = re.compile(r"[#$>]\s*$")
 PASSWORD_RE = re.compile(r"password:\s*$", re.IGNORECASE)
 MENU_READY_RE = re.compile(r"ctrl-D to quit", re.IGNORECASE)
 MENU_ROW_RE = re.compile(r"\|\s*(\d+)\s*\|\s*([\w.\-]+)@")
@@ -64,7 +68,22 @@ MENU_ROW_RE = re.compile(r"\|\s*(\d+)\s*\|\s*([\w.\-]+)@")
 # insider-threat signal (failed privesc attempt), not a script failure --
 # see run_session, which cancels it with Ctrl+C and keeps going.
 SUDO_DENIED_RE = re.compile(r"password for [^:]+:\s*$", re.IGNORECASE)
-STEP_TIMEOUT = 15  # seconds to wait for each expected prompt
+# Strip terminal escape sequences before prompt-matching (coloured PS1, cursor
+# moves, etc.). Without this a prompt like "\x1b[01;32mroot@host\x1b[0m# " never
+# matches PROMPT_RE and the step times out even though the command finished.
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+
+# Per-step timeout (waiting for one prompt). Env-tunable; default raised from 15
+# to 30 because network commands (scp/curl/nc with their own timeouts, find) and
+# a slow account checkout legitimately exceed 15s. CONNECT_TIMEOUT covers the
+# slower login+menu-checkout phase.
+STEP_TIMEOUT = int(os.environ.get("WALLIX_STEP_TIMEOUT", "30"))
+CONNECT_TIMEOUT = int(os.environ.get("WALLIX_CONNECT_TIMEOUT", "45"))
+# Transient test-ssh lockout / rate-limiting after back-to-back logins is the
+# main cause of empty-buffer connect failures (CLAUDE.md 3.8). Retry the connect
+# a few times with growing backoff instead of failing the session outright.
+CONNECT_RETRIES = int(os.environ.get("WALLIX_CONNECT_RETRIES", "3"))
+CONNECT_BACKOFF = float(os.environ.get("WALLIX_CONNECT_BACKOFF", "5"))  # seconds, doubled each try
 
 # Real vaulted accounts on debian-lab, as offered by the WALLIX selection menu.
 # THIS LIST IS WALLIX CONFIGURATION AND IT MOVES. Observed 2026-08-15:
@@ -399,9 +418,11 @@ def _read_until_any(channel, patterns: List[re.Pattern],
         if channel.recv_ready():
             chunk = channel.recv(4096).decode("utf-8", errors="replace")
             buf += chunk
+            # Match against an ANSI-stripped view so a coloured prompt still hits.
+            clean = ANSI_RE.sub("", buf)
             for i, pattern in enumerate(patterns):
-                if pattern.search(buf):
-                    return buf, i
+                if pattern.search(clean):
+                    return clean, i
         else:
             time.sleep(0.1)
     pat_desc = " | ".join(p.pattern for p in patterns)
@@ -412,13 +433,80 @@ def _send(channel, line: str) -> None:
     channel.send(line + "\n")
 
 
-def _select_account(channel, account: str) -> None:
+# The WALLIX prompt shown after the target shell exits, before the transport
+# drops. Reaching it means the session tore down cleanly (so SESSION_DISCONNECTION
+# is logged for our session_id).
+SELECTOR_RE = re.compile(r"back to selector|ctrl-D to quit", re.IGNORECASE)
+
+
+def _drain_until_closed(channel, timeout: int = STEP_TIMEOUT) -> None:
+    """After `exit`, read until the channel reports EOF or WALLIX shows the
+    selector -- i.e. the session has actually closed. Returns quietly on timeout;
+    a graceful close is best-effort, not worth failing an otherwise-good session."""
+    deadline = time.time() + timeout
+    buf = ""
+    while time.time() < deadline:
+        if channel.exit_status_ready() or channel.closed:
+            return
+        if channel.recv_ready():
+            chunk = channel.recv(4096).decode("utf-8", errors="replace")
+            if not chunk:            # EOF
+                return
+            buf += chunk
+            if SELECTOR_RE.search(ANSI_RE.sub("", buf)):
+                # Session closed back to the WALLIX selector; give WALLIX a beat
+                # to emit the SESSION_DISCONNECTION log line, then we're done.
+                time.sleep(1.0)
+                return
+        else:
+            time.sleep(0.1)
+
+
+def _select_account(channel, account: str, timeout: int = CONNECT_TIMEOUT) -> None:
     """Parse the WALLIX account-selection menu and pick the row matching `account`."""
-    buf = _read_until(channel, MENU_READY_RE)
+    buf = _read_until(channel, MENU_READY_RE, timeout=timeout)
     by_name = {name: idx for idx, name in MENU_ROW_RE.findall(buf)}  # account name -> row id
     if account not in by_name:
         raise SessionError(f"account {account!r} not found in WALLIX menu; saw: {by_name}")
     _send(channel, by_name[account])
+
+
+def _open_session(account: str, session_tag: str, verbose: bool = False):
+    """Connect, pick the account, clear the optional 2nd-password prompt, and send
+    the TAG marker. Retries the whole login on transient failures (test-ssh
+    lockout / rate-limiting after back-to-back sessions -- CLAUDE.md 3.8), with
+    growing backoff. Returns (client, channel) ready for the command loop."""
+    last_err = None
+    for attempt in range(1, CONNECT_RETRIES + 1):
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(BASTION_HOST, port=BASTION_PORT, username=LOGIN_USER,
+                           password=LOGIN_PASS, look_for_keys=False, allow_agent=False,
+                           timeout=CONNECT_TIMEOUT)
+            channel = client.invoke_shell()
+            # Account-selection menu (table of ID | Site | Authorization); pick by ID.
+            _select_account(channel, account)
+            # Some vaulted accounts prompt for a second password, others connect
+            # straight to a shell -- WALLIX config, not predictable here. Detect it.
+            _, matched = _read_until_any(channel, [PASSWORD_RE, PROMPT_RE],
+                                         timeout=CONNECT_TIMEOUT)
+            if matched == 0:
+                _send(channel, TARGET_PASS)
+                _read_until(channel, PROMPT_RE, timeout=CONNECT_TIMEOUT)
+            _send(channel, f"echo TAG:{session_tag}")
+            _read_until(channel, PROMPT_RE)
+            return client, channel
+        except (SessionError, paramiko.SSHException, OSError) as e:
+            client.close()
+            last_err = e
+            if attempt < CONNECT_RETRIES:
+                wait = CONNECT_BACKOFF * (2 ** (attempt - 1))
+                if verbose:
+                    print(f"       (connect attempt {attempt} failed: {e}; "
+                          f"retrying in {wait:.0f}s)", file=sys.stderr)
+                time.sleep(wait)
+    raise SessionError(f"connect failed after {CONNECT_RETRIES} attempts: {last_err}")
 
 
 def run_session(scenario_name: str, commands: List[str], session_tag: str, account: str,
@@ -440,31 +528,10 @@ def run_session(scenario_name: str, commands: List[str], session_tag: str, accou
             print(f"    {c}")
         return {"commands_sent": resolved, "commands_denied": []}
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(BASTION_HOST, port=BASTION_PORT, username=LOGIN_USER,
-                   password=LOGIN_PASS, look_for_keys=False, allow_agent=False,
-                   timeout=STEP_TIMEOUT)
-    channel = client.invoke_shell()
+    # Connect + account select + TAG marker, with retry/backoff on transient
+    # lockout. Raises SessionError if all attempts fail (caught by the caller).
+    client, channel = _open_session(account, session_tag, verbose=verbose)
     try:
-        # Post-auth, WALLIX shows an account-selection menu (table of ID | Site |
-        # Authorization). Pick the row for `account` by ID.
-        _select_account(channel, account)
-
-        # Some vaulted accounts prompt for a second password, others check out
-        # and connect straight to a shell. WHICH ones is WALLIX configuration,
-        # not a property of this script: p_admin required the password when this
-        # was written and stopped requiring it by 2026-08-15, at which point
-        # assuming it hung every attack session until STEP_TIMEOUT.
-        # So detect the prompt instead of predicting it.
-        _, matched = _read_until_any(channel, [PASSWORD_RE, PROMPT_RE])
-        if matched == 0:
-            _send(channel, TARGET_PASS)
-            _read_until(channel, PROMPT_RE)
-
-        _send(channel, f"echo TAG:{session_tag}")
-        _read_until(channel, PROMPT_RE)
-
         denied = []
         for cmd in resolved:
             if verbose:
@@ -481,8 +548,15 @@ def run_session(scenario_name: str, commands: List[str], session_tag: str, accou
                 channel.send("\x03")
                 _read_until(channel, PROMPT_RE)
 
+        # Close GRACEFULLY. Sending `exit` then force-closing the transport too
+        # fast makes WALLIX log only the proxy-level `[sshproxy] DISCONNECTION`
+        # (psid, not joinable) and skip the rich `[SSH Session] SESSION_DISCONNECTION`
+        # (session_id + duration) that extract needs to mark the session closed.
+        # So after `exit`, drain the channel until the session actually ends
+        # (EOF, or WALLIX's "back to selector" prompt) before closing -- this is
+        # what lets the session-close event fire for our session_id.
         _send(channel, "exit")
-        time.sleep(0.5)
+        _drain_until_closed(channel, timeout=STEP_TIMEOUT)
         return {"commands_sent": resolved, "commands_denied": denied}
     finally:
         client.close()
@@ -659,7 +733,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             })
 
         if not args.dry_run:
-            time.sleep(random.uniform(1.0, 3.0))
+            # Space out logins: back-to-back checkouts are what trip test-ssh
+            # lockout/rate-limiting mid-batch. Env-tunable via WALLIX_SESSION_GAP.
+            gap = float(os.environ.get("WALLIX_SESSION_GAP", "4"))
+            time.sleep(random.uniform(gap, gap * 1.75))
 
     if not args.dry_run:
         print(f"[simulate] ground truth -> {GROUND_TRUTH_PATH}", file=sys.stderr)

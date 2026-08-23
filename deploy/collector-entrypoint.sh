@@ -24,9 +24,14 @@ echo "[entrypoint] api=$API out=$OUT interval=${INTERVAL}s extract-since=$SINCE"
 # --- background: refresh sessions.jsonl from the indexer ---------------------
 (
   while true; do
+    # --overwrite: re-pull replaces the previous copy of a session instead of
+    # append+dedup keeping the FIRST-seen one. Essential for live sessions -- if a
+    # session is extracted before its SESSION_DISCONNECTION is indexed, the first
+    # copy has an estimated (open) end and the collector skips it forever; with
+    # --overwrite the later, closed copy wins and the session gets scored.
     python feature_extraction/extract.py \
         --source indexer --index archives \
-        --since "$SINCE" --out-dir "$OUT" \
+        --since "$SINCE" --out-dir "$OUT" --overwrite \
       || echo "[entrypoint] extract failed (indexer unreachable?); retry next cycle"
     sleep "$INTERVAL"
   done
