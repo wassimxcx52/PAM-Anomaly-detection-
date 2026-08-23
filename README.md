@@ -53,9 +53,22 @@ ml/  unsupervised (IsolationForest/KMeans) + supervised (LightGBM/RF) bake-off,
       ▼
 api/main.py                        POST /score → ranked alert queue
 
+  ── real-time serving loop (deploy/) ──
+api/collector.py    every 30s: extract closed sessions → POST /grafana/ingest
+      ▼             (model scores once per session, result cached)
+api/store.py        SQLite cache (scores + features + per-command audit)
+      ▼
+api/grafana_api.py  GET /grafana/*  → Grafana dashboard (10s auto-refresh)
+
   ── in parallel ──
 dataset_generation/   curate → calibrate → weight → generate synthetic training data
 ```
+
+The **real-time loop** (`deploy/`) keeps Grafana's auto-refresh off the model:
+inference runs once per session at ingest and is cached in SQLite, so panels poll
+cheap SQL. One command brings up the scoring API + collector + Grafana:
+`docker compose -f deploy/docker-compose.yml up -d --build`. See
+[`deploy/TEAM_GUIDE.md`](deploy/TEAM_GUIDE.md).
 
 ## Results
 
@@ -91,9 +104,13 @@ obvious attacks are easy.
 
 ```
 .
-├── infra/wazuh/
-│   ├── wallix_decoder.xml       # source of truth; live deployment bind-mounts its own copy
-│   └── wallix_rules.xml         # detection rules, 6 tactics, MITRE-mapped
+├── infra/
+│   ├── wazuh/
+│   │   ├── wallix_decoder.xml       # source of truth; live deployment bind-mounts its own copy
+│   │   ├── wallix_rules.xml         # detection rules, 6 tactics, MITRE-mapped
+│   │   └── docker-compose.wazuh.yml # reference compose for the Wazuh single-node SIEM tier
+│   └── wallix/
+│       └── 99-wazuh-forward.conf    # WALLIX syslog-ng drop-in (OS-log forward to Wazuh)
 │
 ├── feature_extraction/          # REAL side: collection + feature pipeline
 │   ├── simulate_sessions.py     #   drives real labelled SSH sessions through WALLIX
@@ -128,10 +145,23 @@ obvious attacks are easy.
 │
 ├── api/                         # serving layer
 │   ├── main.py                  #   FastAPI: POST /score, GET /model, GET /health
-│   ├── Dockerfile               #   ships feature code, not just a pickle
-│   └── docker-compose.yml       #   joins the Wazuh stack's network
+│   ├── grafana_api.py           #   GET /grafana/* (dashboard feeds) + POST /grafana/ingest
+│   ├── store.py                 #   SQLite cache: scores + features + per-command audit
+│   ├── collector.py             #   real-time loop: extract closed sessions → ingest
+│   ├── seed_demo.py             #   re-time sessions onto "now" for demos
+│   └── Dockerfile               #   ships feature code, not just a pickle
 │
-├── visualisation/               # report figures (PNG + PDF) + plotting script
+├── deploy/                      # one-command real-time stack (Scenario A)
+│   ├── docker-compose.yml       #   pam-scoring + pam-collector + pam-grafana
+│   ├── .env.example             #   only WALLIX_HOST changes per machine
+│   ├── setup-env.{ps1,sh}       #   detect host IP, write .env
+│   ├── collector-entrypoint.sh  #   extract (--overwrite) + continuous ingest
+│   └── TEAM_GUIDE.md            #   step-by-step deployment guide for colleagues
+│
+├── visualisation/
+│   ├── grafana/                 #   Grafana dashboard JSON + Infinity datasource provisioning
+│   ├── dashboard/               #   standalone Chart.js dashboard (no Grafana needed)
+│   └── *.png / *.pdf            #   report figures + plotting script
 ├── docs/                        # guides, decision log, session logs
 └── requirements.txt
 ```
@@ -161,9 +191,19 @@ obvious attacks are easy.
 - **Scoring service**: `api/` serves the saved bundle over HTTP. It imports
   `transform.py` rather than reimplementing features, so serving cannot drift from
   training.
-- **Known limitation**: WALLIX forwards only `KBD_INPUT`, not session open/close
-  lifecycle events, so `session_start`/`session_end`/`duration_sec` are best-effort
-  estimates from per-session min/max timestamps (flagged via `*_is_estimated`).
+- **Real-time serving loop** (`deploy/`): built and verified end-to-end. A
+  collector extracts newly-closed sessions every 30s and POSTs them once to the
+  scoring service, which caches scores/features/per-command audit in SQLite; a
+  Grafana dashboard (auto-provisioned Infinity datasource) reads that cache on a
+  10s refresh. A live session appears automatically within ~1 min of closing. A
+  standalone Chart.js dashboard (`visualisation/dashboard/`) offers the same views
+  without Grafana.
+- **Session lifecycle decoding** (was a known limitation, now fixed): WALLIX does
+  forward `SESSION_DISCONNECTION`, but the decoder wasn't parsing it (a sibling
+  child-decoder blocked fallthrough) — fixed with per-child `<prematch>`. Combined
+  with a graceful session close in `simulate_sessions.py`, `session_end`/`duration`
+  are now real (not estimated) for cleanly-closed sessions. RDP not verified; FTP
+  not set up.
 - **Rules-vs-ML baseline**: complete. The deployed rules are scored from their
   own `rule_id`s and appear as a row in `results_all.csv`; each model reports how
   many of the rules' 17 misses it surfaces inside the alert budget.
@@ -174,8 +214,8 @@ obvious attacks are easy.
   model feature; making it one would require inventing a benign denial rate that
   no data supports.
 - **Not yet built**: RAG SOC copilot (Qdrant + `/ask`), `auth.py` (RBAC for the
-  API), dashboard, and the remaining contextual features (per-user z-scores,
-  24h rolling aggregates, `role_command_mismatch`).
+  API), and the remaining contextual features (per-user z-scores, 24h rolling
+  aggregates, `role_command_mismatch`).
 
 ## Setup
 
@@ -217,21 +257,28 @@ python ml/compare.py                                                # -> ml/resu
 python ml/score.py --sessions feature_extraction/out/eval_real.jsonl \
                    --bundle ml/bundles/isolationforest.joblib --top 10
 
-# --- SERVE ---
-docker compose -f api/docker-compose.yml up -d --build              # 127.0.0.1:8000
+# --- SERVE (real-time stack: scoring API + collector + Grafana) ---
+cd deploy
+cp .env.example .env        # set WALLIX_HOST; helper: ./setup-env.ps1 (or .sh)
+docker compose -f docker-compose.yml up -d --build                  # Grafana on :3000
+# open http://localhost:3000  (dashboard "PAM Anomaly Scores", set range Last 24h)
 ```
 
-Note that `ml/bundles/` is gitignored — model weights are build output, so the
-API image can only be built after a local training run.
+Model bundles are committed under `ml/bundles/`, so the API image builds without a
+local training run. The Wazuh SIEM tier is a separate stack — see
+[`infra/wazuh/docker-compose.wazuh.yml`](infra/wazuh/docker-compose.wazuh.yml) and
+[`deploy/TEAM_GUIDE.md`](deploy/TEAM_GUIDE.md).
 
 ## Security notes
 
 - `feature_extraction/out/` contains real session telemetry. Some attack scenarios
   (e.g. privilege-escalation) can echo credentials into keystroke data — never feed
   raw session data unsanitised into a RAG/vector store.
-- **`/score` has no authentication.** `auth.py` is Security-owned and unbuilt, and
-  the endpoint returns privileged session content. Compose publishes to
-  `127.0.0.1` only; do not expose it publicly until RBAC exists.
+- **`/score` and `/grafana/*` have no authentication.** `auth.py` is Security-owned
+  and unbuilt, and the endpoints return privileged session content. The `deploy/`
+  stack keeps `pam-scoring` on an internal network with **no published port** (only
+  Grafana is exposed, with its own login); do not publish the scoring API until
+  RBAC exists.
 - The Wazuh indexer connection disables TLS verification for the lab's self-signed
   certificate; do not carry that setting into production.
 - This is a lab environment on a private network; the repo currently contains lab

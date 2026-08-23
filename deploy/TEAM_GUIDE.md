@@ -81,12 +81,17 @@ Then edit `deploy/.env` if you want to change `GF_ADMIN_PASSWORD` / `GF_PORT`.
 ## Step 3 — Bring it up
 
 **a) Wazuh stack** (once):
+The compose is versioned at `infra/wazuh/docker-compose.wazuh.yml`, but it needs the
+`config/` tree (certs, filebeat, indexer/dashboard YAML) from the `wazuh-docker`
+single-node deployment — run it from there so the `./config/...` bind mounts resolve:
 ```bash
 cd wazuh-docker/single-node
+# first boot only — generate certs:
+docker compose -f generate-indexer-certs.yml run --rm generator
 docker compose up -d
-# first boot only, if the indexer needs certs:
-# docker compose -f generate-indexer-certs.yml run --rm generator
 ```
+> The WALLIX decoder + rules bind-mounted here are the same as `infra/wazuh/`
+> (source of truth). Keep `config/wallix/` in sync with `infra/wazuh/`.
 
 **b) PAM stack:**
 ```bash
